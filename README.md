@@ -8,15 +8,12 @@ MammoRG is capable of taking four-view mammogram images of patients (RCC, RMLO, 
 ## Contents
 - [Introduction](#introduction)
 - [Requirements](#requirements)
+- [Preparation](#preparation)
 - [Train](#train)
-  - [0. Preparation](#0-preparation)
-  - [1. Pretrain (Alignment)](#1-pretrain-alignment)
-  - [2. Fine-tuning (LoRA)](#2-fine-tuning-lora)
-- [Inference](#inference)
 - [Evaluation](#evaluation)
-- [Citation](#citation)
-- [License and Usage Notices](#license-and-usage-notices)
-- [Acknowledgements](#acknowledgements)
+- [Inference](#inference)
+- [MammoRGTool](#mammorgtool)
+
 
 ## Requirements
 ```shell
@@ -28,23 +25,32 @@ conda activate mammorg
 
 python -m pip install -r requirements.txt
 ```
+## Preparation
+- A pre-trained LLaVA-Mammo, please download the weight from [A Benchmark for Breast Cancer Screening and Diagnosis in Mammogram Visual Question Answering](https://drive.google.com/file/d/1uFCrOTbsvug8YZoHKR7wlvoTSwzB32EY/view?usp=sharing) and unzip it, then rename the forder to `LLaVA-Mammo-checkpoint'. Remember to change the related path in the code.
+- A pre-trained vision backbone VersaMammo, please download the weight from [A Versatile Foundation Model for AI-enabled Mammogram Interpretation](https://drive.google.com/file/d/1HmEzoJDs99-t6_mUnrjnkcY8nTJ8WeVp/view?usp=sharing). Remember to change the related path in the code.
+- Please prepare your own report database using the [code]().
 
 ## Train
-When starting from scratch, the following checkpoints are needed:
-- A pre-trained LLaVA-Mammo, please download the weight from [A Benchmark for Breast Cancer Screening and Diagnosis in Mammogram Visual Question Answering](https://drive.google.com/file/d/1uFCrOTbsvug8YZoHKR7wlvoTSwzB32EY/view?usp=sharing)
-- A pre-trained vision backbone VersaMammo, please download the weight from [A Versatile Foundation Model for AI-enabled Mammogram Interpretation](https://drive.google.com/file/d/1HmEzoJDs99-t6_mUnrjnkcY8nTJ8WeVp/view?usp=sharing)
-
-### 0. Preparation
-Before running the commands below, you need to have the data, image folder, and the above checkpoints ready. 
+Before running the commands below, you need to have the data, and the above preparation ready. 
 
 **0.1 Data**
 
-Since our training set is a private dataset and cannot be made public, if you wish to use your own dataset, you can process the data into the following format:
+Since our training set is a private dataset and cannot be made public, if you wish to use your own dataset.
+首先你需要把你的数据集整理成一个excel文件，它需要包含以下4列：ID, Findings, Impression, image_paths:
+| ID | Findings | Impression | image_paths |
+|--------------|--------------|------------|--------|
+| 123456 | "..." | "..." | "R_CC": ""path to the rcc image", "R_MLO": "", "L_CC": "", "L_MLO": "" |
+
+You can use the [processing code]() to process the excel file into the following format:
 ````
 {
    "1": {
       "Data_source": "Could be dataset's name",
       "ID": "Could be sample's name",
+      "Original_text": {
+         "Findings": "...",
+         "Impression": "..."
+      },
       "Cleaned_text": {
          "Findings": "...",
          "Impression": "..."
@@ -105,91 +111,34 @@ Since our training set is a private dataset and cannot be made public, if you wi
    ...
 }
 ````
-
-**0.2 Images**
-
-You need to download the [MIMIC-CXR-JPG images from PhysioNet](https://physionet.org/content/mimic-cxr-jpg/2.0.0/) by signing the data use agreement and following the instructions.
-
-**0.3 Model weights**
-
-You can find the pretrained model weights for BiomedCLIP-CXR and LLaVA-Rad at https://huggingface.co/microsoft/llava-rad.
-
-
 **Notes before proceeding:** 
-- Change the paths in the scripts below according to where you downloaded the data.
-- Batch size is set for 4-GPU machines. If your machine has a difference number of GPUs, please change batch size. Training commands have been tested on a single 80GB A100 and 4x80GB H100, using torch 2.4.1 and cuda 11.8 with flash attention 2.7.2.post1.
+- Change the paths in the scripts according to where you output the data.
 
-### 1. Pretrain (Alignment)
-At this stage, we only train the projection layer (which aligns the vision features with text features). The vision encoder and LLM are all frozen.
-
+### Start training
 ```bash
-bash scripts/pretrain.sh
+cd mammorg
+bash scripts/main.sh
 ```
 
-We get a pretrained projector `mm_projector.bin` after pretraining.
-
-### 2. Fine-tuning (LoRA)
-Once we have a pretrained projector, we can do fine-tuning. The command below fine-tunes the projector and LoRA of LLM:
-```bash
-bash scripts/finetune_lora.sh
-```
-
-## Inference
-
+## Evaluation
 Before running the command below, you need to change the script accordingly.
 
 ```bash
+cd mammorg
 bash scripts/eval.sh
 ```
 
-**Note:** To reproduce the evaluation results from the manuscript on the MIMIC-CXR dataset, changing the script means uncommenting and updating the paths for `query_file` and `image_folder`.
+## Inference with only images
+Please download the MammoRG [checkpoint](https://drive.google.com/drive/folders/14unT6BeKGHWaqJNXF9vXiYToEKwlUnpO?usp=sharing) first.
 
-In the manuscript, the Open-I and CheXpert chest X-ray images and reports are also used for evaluation. These datasets are available at their corresponding sources: [Open-I](https://openi.nlm.nih.gov/faq) | [CheXpert](https://stanfordaimi.azurewebsites.net/datasets/5158c524-d3ab-4e02-96e9-6ee9efc110a1).
-
-## Evaluation
-
-If you have run inference using multiple GPUs and have a resulting set of chunks with results, make sure you concatenate prediction chunks into a single file before running the following command:
+Before running the command below, you need to change the script and [inference]() accordingly.
 ```bash
-cd llava/eval/rr_eval
-python run.py ${YOUR_PREDICTION_FILE}
+cd mammorg
+bash scripts/inference.sh
 ```
-
-## Citation
-
-```bibtex
-
-@Article{ZambranoChaves2025,
-author={Zambrano Chaves, Juan Manuel and Huang, Shih-Cheng and Xu, Yanbo and Xu, Hanwen and Usuyama, Naoto and Zhang, Sheng and Wang, Fei and Xie, Yujia and Khademi, Mahmoud and Yang, Ziyi and Awadalla, Hany and Gong, Julia and Hu, Houdong and Yang, Jianwei and Li, Chunyuan and Gao, Jianfeng and Gu, Yu and Wong, Cliff and Wei, Mu and Naumann, Tristan and Chen, Muhao and Lungren, Matthew P. and Chaudhari, Akshay and Yeung-Levy, Serena and Langlotz, Curtis P. and Wang, Sheng and Poon, Hoifung},
-title={A clinically accessible small multimodal radiology model and evaluation metric for chest X-ray findings},
-journal={Nature Communications},
-year={2025},
-month={Apr},
-day={01},
-volume={16},
-number={1},
-pages={3108},
-issn={2041-1723},
-doi={10.1038/s41467-025-58344-x},
-url={https://doi.org/10.1038/s41467-025-58344-x}
-}
-
-```
-
-## License and Usage Notices
-
-The data, code, and model checkpoints are licensed and intended for research use only. The code and model checkpoints are subject to additional restrictions as determined by the Terms of Use of LLaMA, Vicuna, and GPT-4 respectively. Code and model checkpoints may be used for research purposes and should not be used in direct clinical care or for any clinical decision making purpose.
-
-## Acknowledgements
-
-Our codebase heavily relies on [LLaVA](https://github.com/haotian-liu/LLaVA) v1.5. Please check out their repo for more information, and consider citing them in addition to our manuscript if you use this codebase.
-
-```bibtex
-
-@misc{liu2023improvedllava,
-      title={Improved Baselines with Visual Instruction Tuning}, 
-      author={Liu, Haotian and Li, Chunyuan and Li, Yuheng and Lee, Yong Jae},
-      publisher={arXiv:2310.03744},
-      year={2023},
-}
-
+## MammoRGTool
+Here is an example for how to use MammoRGTool to evaluate:
+```shell
+cd MammoRGTool
+python tool.py
 ```
