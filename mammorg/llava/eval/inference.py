@@ -20,25 +20,14 @@ from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_S
 import re
 
 def remove_spaces_except_birads(text):
-    # 先把 "Bi-Rads " 后面的空格替换成一个特殊标记，避免被删掉
     text = re.sub(r'(Bi-Rads)\s+', r'\1<<SPACE>>', text)
-
-    # 去掉所有空格
     text = text.replace(" ", "")
-
-    # 再把特殊标记替换回单个空格
     text = text.replace("<<SPACE>>", " ")
 
     return text
 def clean_report_text(text):
-    # 1. 去掉 2D / 2D+3D 显示前缀
     text = re.sub(r'2D(\+3D)?显示[:：]', '', text)
-    
-    # 2. 修复：将 \\n 替换为句号
-    # 移除 \b 限制，因为 n 后面可能紧跟数字
     text = re.sub(r'\\{1,}n', '。', text)
-    
-    # 3. 其余两个及以上反斜杠删除
     text = re.sub(r'\\{1,}[a-zA-Z]?', '', text)
     
     return text
