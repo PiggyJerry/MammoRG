@@ -41,7 +41,7 @@ First, you need to organize your dataset into an Excel file. It must include the
 |--------------|--------------|------------|--------|
 | 123456 | "..." | "..." | "R_CC": ""path to the rcc image", "R_MLO": "", "L_CC": "", "L_MLO": "" |
 
-You can use the [processing code]() to process the excel file into the following format:
+You can use the [processing code](https://github.com/PiggyJerry/MammoRG/blob/main/MammoRGTool/generate_data.py) to process the excel file into the following format:
 ````
 {
    "1": {
