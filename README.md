@@ -131,7 +131,7 @@ bash scripts/eval.sh
 ## Inference with only images
 Please download the MammoRG [checkpoint](https://drive.google.com/drive/folders/14unT6BeKGHWaqJNXF9vXiYToEKwlUnpO?usp=sharing) first.
 
-Before running the command below, you need to change the script and [inference]() accordingly.
+Before running the command below, you need to change the script and [inference](https://github.com/PiggyJerry/MammoRG/blob/main/mammorg/llava/eval/inference.py) accordingly.
 ```bash
 cd mammorg
 bash scripts/inference.sh
