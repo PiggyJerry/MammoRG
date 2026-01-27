@@ -36,7 +36,7 @@ Before running the commands below, you need to have the data, and the above prep
 **0.1 Data**
 
 Since our training set is a private dataset and cannot be made public, if you wish to use your own dataset.
-首先你需要把你的数据集整理成一个excel文件，它需要包含以下4列：ID, Findings, Impression, image_paths:
+First, you need to organize your dataset into an Excel file. It must include the following four columns: ID, Findings, Impression, and image_paths.
 | ID | Findings | Impression | image_paths |
 |--------------|--------------|------------|--------|
 | 123456 | "..." | "..." | "R_CC": ""path to the rcc image", "R_MLO": "", "L_CC": "", "L_MLO": "" |
@@ -137,6 +137,8 @@ cd mammorg
 bash scripts/inference.sh
 ```
 ## MammoRGTool
+Please download the MammoRGTool [checkpoint](https://drive.google.com/drive/folders/1KrXdk7jjvYXFL2K18i7hYnq7x8U8eItN?usp=sharing) first and put the downloaded folder `/checkpoint' under `/MammoRGTool'.
+
 Here is an example for how to use MammoRGTool to evaluate:
 ```shell
 cd MammoRGTool
