@@ -20,13 +20,8 @@ from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_S
 import re
 
 def remove_spaces_except_birads(text):
-    # 先把 "Bi-Rads " 后面的空格替换成一个特殊标记，避免被删掉
     text = re.sub(r'(Bi-Rads)\s+', r'\1<<SPACE>>', text)
-
-    # 去掉所有空格
     text = text.replace(" ", "")
-
-    # 再把特殊标记替换回单个空格
     text = text.replace("<<SPACE>>", " ")
 
     return text
