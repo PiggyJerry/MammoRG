@@ -26,7 +26,7 @@ conda activate mammorg
 python -m pip install -r requirements.txt
 ```
 ## Preparation
-- A pre-trained LLaVA-Mammo, please download the weight from [A Benchmark for Breast Cancer Screening and Diagnosis in Mammogram Visual Question Answering](https://drive.google.com/file/d/1uFCrOTbsvug8YZoHKR7wlvoTSwzB32EY/view?usp=sharing) and unzip it, then rename the forder to `LLaVA-Mammo-checkpoint'. Remember to change the related path in the code.
+- A pre-trained LLaVA-Mammo, please download the weight from [A Benchmark for Breast Cancer Screening and Diagnosis in Mammogram Visual Question Answering](https://drive.google.com/file/d/1uFCrOTbsvug8YZoHKR7wlvoTSwzB32EY/view?usp=sharing) and unzip it, then rename the forder to `LLaVA-Mammo-checkpoint`. Remember to change the related path in the code.
 - A pre-trained vision backbone VersaMammo, please download the weight from [A Versatile Foundation Model for AI-enabled Mammogram Interpretation](https://drive.google.com/file/d/1HmEzoJDs99-t6_mUnrjnkcY8nTJ8WeVp/view?usp=sharing). Remember to change the related path in the code.
 - Please prepare your own report database using the [code]().
 
