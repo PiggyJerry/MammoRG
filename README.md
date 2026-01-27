@@ -8,7 +8,6 @@ MammoRG is capable of taking four-view mammogram images of patients (RCC, RMLO, 
 ## Contents
 - [Introduction](#introduction)
 - [Requirements](#requirements)
-- [Installation](#installation)
 - [Train](#train)
   - [0. Preparation](#0-preparation)
   - [1. Pretrain (Alignment)](#1-pretrain-alignment)
@@ -19,53 +18,93 @@ MammoRG is capable of taking four-view mammogram images of patients (RCC, RMLO, 
 - [License and Usage Notices](#license-and-usage-notices)
 - [Acknowledgements](#acknowledgements)
 
-
 ## Requirements
 ```shell
-git clone https://github.com/PiggyJerry/MammoVQA.git
+git clone https://github.com/PiggyJerry/MammoRG.git
 
-conda create -n mammovqa python==3.9
-conda activate mammovqa
+cd MammoRG
+conda create -n mammorg python==3.9
+conda activate mammorg
 
 python -m pip install -r requirements.txt
 ```
-## Installation
-
-Follow these steps to set up LLaVA-Rad:
-
-1. Clone the repository and navigate to the project folder:
-   ```Shell
-   git clone https://github.com/microsoft/LLaVA-Rad.git
-   cd LLaVA-Rad
-   ```
-2. Create and activate a virtual environment (Python 3.10):
-   ```Shell
-   conda create -n llavarad python=3.10 -y
-   conda activate llavarad
-   ```
-3. Upgrade pip and install the package:
-   ```Shell
-   pip install --upgrade pip  # enable PEP 660 support
-   pip install -e .
-   ```
-4. [Optional] Install additional dependencies for training:
-   ```bash
-   pip install ninja
-   pip install flash-attn --no-build-isolation
-   ```
 
 ## Train
-
 When starting from scratch, the following checkpoints are needed:
-- A pre-trained LM checkpoint, e.g., [lmsys/vicuna-7b-v1.5](https://huggingface.co/lmsys/vicuna-7b-v1.5)
-- By default, we use a customized domain-specific ViT, BiomedCLIP-CXR. See [README.md](./llava/model/multimodal_encoder/open_clip_encoder/README.md) for details.
+- A pre-trained LLaVA-Mammo, please download the weight from [A Benchmark for Breast Cancer Screening and Diagnosis in Mammogram Visual Question Answering](https://drive.google.com/file/d/1uFCrOTbsvug8YZoHKR7wlvoTSwzB32EY/view?usp=sharing)
+- A pre-trained vision backbone VersaMammo, please download the weight from [A Versatile Foundation Model for AI-enabled Mammogram Interpretation](https://drive.google.com/file/d/1HmEzoJDs99-t6_mUnrjnkcY8nTJ8WeVp/view?usp=sharing)
 
 ### 0. Preparation
 Before running the commands below, you need to have the data, image folder, and the above checkpoints ready. 
 
 **0.1 Data**
 
-To download the data, sign the data use agreement and follow the instructions for download at [LLaVA-Rad MIMIC-CXR Annotations on PhysioNet](https://physionet.org/content/llava-rad-mimic-cxr-annotation/1.0.0/). This will include reports with extracted sections in LLaVA format, split into train/dev/test.
+Since our training set is a private dataset and cannot be made public, if you wish to use your own dataset, you can process the data into the following format:
+````
+{
+   "1": {
+      "Data_source": "Could be dataset's name",
+      "ID": "Could be sample's name",
+      "Cleaned_text": {
+         "Findings": "...",
+         "Impression": "..."
+      },
+      "Image_paths": {
+         "R_CC": "path to the rcc image",
+         "R_MLO": "path to the rmlo image",
+         "L_CC": "path to the lcc image",
+         "L_MLO": "path to the lmlo image",
+      },
+      "Breast_assessment": {
+         "Left_breast": {
+            "Density": "...",
+            "Bi-Rads": "...",
+            "Entities": {
+               "钙化": "...",
+               "肿块": "...",
+               "乳腺增生": "...",
+               "皮肤增厚": "...",
+               "淋巴结肿大": "...",
+               "乳头凹陷": "...",
+               "结构扭曲": "...",
+               "悬韧带增粗": "...",
+               "结节": "...",
+               "结构不对称": "..."
+            }
+         },
+         "Right_breast": {
+            "Density": "...",
+            "Bi-Rads": "...",
+            "Entities": {
+               "钙化": "...",
+               "肿块": "...",
+               "乳腺增生": "...",
+               "皮肤增厚": "...",
+               "淋巴结肿大": "...",
+               "乳头凹陷": "...",
+               "结构扭曲": "...",
+               "悬韧带增粗": "...",
+               "结节": "...",
+               "结构不对称": "..."
+            }
+         }
+      },
+      "Relations": [
+         [
+            Triplet 1
+         ],
+         [
+            Triplet 2
+         ],
+         ...
+      ]
+   },
+   "2": {
+      ...
+   },
+   ...
+}
+````
 
 **0.2 Images**
 
