@@ -137,7 +137,7 @@ cd mammorg
 bash scripts/inference.sh
 ```
 ## MammoRGTool
-Please download the MammoRGTool [checkpoint](https://drive.google.com/drive/folders/1KrXdk7jjvYXFL2K18i7hYnq7x8U8eItN?usp=sharing) first and put the downloaded folder `/checkpoint' under `/MammoRGTool'.
+Please download the MammoRGTool [checkpoint](https://drive.google.com/drive/folders/1KrXdk7jjvYXFL2K18i7hYnq7x8U8eItN?usp=sharing) first and put the downloaded folder `/checkpoint` under `/MammoRGTool`.
 
 Here is an example for how to use MammoRGTool to evaluate:
 ```shell
