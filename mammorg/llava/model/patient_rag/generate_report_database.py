@@ -87,8 +87,8 @@ def process_medical_texts(input_json_path, output_json_path):
 
 
 if __name__ == "__main__":
-    input_json_path = "/home/jiayi/MammoRG-main/mammorg_data/split_data/Train.json"
-    output_json_path = "/home/jiayi/MammoRG-main/mammorg/llava/model/patient_rag/Train_ChineseBERT_embedding_report.json"
+    input_json_path = "/home/user/MammoRG-main/mammorg_data/split_data/Train.json"
+    output_json_path = "/home/user/MammoRG-main/mammorg/llava/model/patient_rag/Train_ChineseBERT_embedding_report.json"
 
     results = process_medical_texts(
         input_json_path, output_json_path
