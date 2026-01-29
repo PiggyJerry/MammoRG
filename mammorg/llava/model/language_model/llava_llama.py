@@ -315,7 +315,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
 
             if self.reference_model is not None and labels is not None:
                 conv_mode = 'v1'
-                image_folder = '/home/jiayi/MammoRG/mammorg_data'
+                image_folder = '/home/user/MammoRG/mammorg_data'
                 temperature, top_p, num_beams, num_generations = 0.9, 0.9, 1, 4
                 
                 prompts, report_labels, batch_images = [], [], []
