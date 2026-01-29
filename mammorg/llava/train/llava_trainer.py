@@ -325,7 +325,7 @@ class LLaVATrainer(Trainer):
                 return batches
         
         image_processor=model.get_model().get_vision_tower().image_processor
-        all_queries = data_loaders['MammoReport_test']('/home/jiayi/MammoRG-main/mammorg_data/split_data/Test.json')
+        all_queries = data_loaders['MammoReport_test']('/home/user/MammoRG-main/mammorg_data/split_data/Test.json')
         queries = get_chunk(all_queries, 1, 0)
 
         batches = create_batches(queries, 64, False, self.tokenizer)
@@ -350,7 +350,7 @@ class LLaVATrainer(Trainer):
                     images = {}
                     for view in ['R_CC', 'R_MLO', 'L_CC', 'L_MLO']:
                         if view in query['Image_paths']:
-                            image_path = os.path.join('/home/jiayi/MammoRG-main/mammorg_data', query['Image_paths'][view])
+                            image_path = os.path.join('/home/user/MammoRG-main/mammorg_data', query['Image_paths'][view])
                             image = Image.open(image_path).convert('RGB')
                             image = image_processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
                             images[view] = image.to(next(model.parameters()).dtype)
