@@ -242,7 +242,7 @@ def rule_based_get_density(conclusion, laterality):
 
 class ZhTokenizer:
     def __init__(self):
-        self.tokenizer = BertTokenizer.from_pretrained('/home/jiayi/MammoRG/MammoRGTool/pre_trained_bert/vocab.txt')
+        self.tokenizer = BertTokenizer.from_pretrained('/home/user/MammoRG/MammoRGTool/pre_trained_bert/vocab.txt')
         self.vocab2id = self.tokenizer.vocab
 
     def tokenize(self, text):
@@ -508,7 +508,7 @@ class MammoRGTool(object):
 
         self.model.to(device)
         self.model.eval()
-        self.refs=json.load(open('/home/jiayi/MammoRG/mammorg_data/split_data/vindr_mammo.json'))
+        self.refs=json.load(open('/home/user/MammoRG/mammorg_data/split_data/vindr_mammo.json'))
         
         self.output_dir=output_dir
         
