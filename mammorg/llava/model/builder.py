@@ -55,7 +55,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
             
             from peft import PeftModel
             print('Loading LoRA weights...')
-            model = PeftModel.from_pretrained(model, "/home/jiayi/MammoRG-main/mammorg/LLaVA-Mammo-checkpoint")
+            model = PeftModel.from_pretrained(model, "/home/user/MammoRG-main/mammorg/LLaVA-Mammo-checkpoint")
             print('Merging LoRA weights...')
             model = model.merge_and_unload()
             print('Model is loaded...')
