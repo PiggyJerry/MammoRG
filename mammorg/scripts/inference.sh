@@ -4,7 +4,7 @@ set -e
 set -o pipefail
 model_name=${MODEL_NAME:-"mammorg"}
 model_base=lmsys/vicuna-7b-v1.5
-model_path=/home/jiayi/MammoRG-main/${model_name}/checkpoints/stage3
+model_path=/home/user/MammoRG-main/${model_name}/checkpoints/stage3
 
 model_base="${1:-$model_base}"
 model_path="${2:-$model_path}"
