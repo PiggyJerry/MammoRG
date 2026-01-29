@@ -940,7 +940,7 @@ def train():
             )
             from peft import PeftModel
             print('Loading LoRA weights...')
-            model = PeftModel.from_pretrained(model, "/home/jiayi/MammoRG-main/mammorg/LLaVA-Mammo-checkpoint")
+            model = PeftModel.from_pretrained(model, "/home/user/MammoRG-main/mammorg/LLaVA-Mammo-checkpoint")
             print('Merging LoRA weights...')
             model = model.merge_and_unload()
             print('Model is loaded...')
@@ -1147,7 +1147,7 @@ def train():
             p.requires_grad = False
     
     if model_args.scs==True:
-        sys.path.append("/home/jiayi/MammoRG-main")
+        sys.path.append("/home/user/MammoRG-main")
         from MammoRGTool.tool import MammoRGTool
         model.tool=MammoRGTool()
         
@@ -1202,7 +1202,7 @@ def train():
         for p in model.model.ref_lm_head.parameters():
             p.requires_grad_(False)
         print(">>> ref_lm_head type:", type(model.model.ref_lm_head))
-    # 检查哪些参数会被优化器更新
+
     for name, p in model.named_parameters():
         if p.requires_grad:
             print(f"Trainable parameters: {name}, shape: {p.shape}")
