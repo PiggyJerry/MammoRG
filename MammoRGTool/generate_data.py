@@ -7,8 +7,8 @@ from tqdm import tqdm
 # 1. 导入 MammoRGTool
 from tool import MammoRGTool
 
-INPUT_EXCEL = "/home/jiayi/MammoRG/MammoRGTool/gz2.xlsx"
-OUTPUT_JSON = "/home/jiayi/MammoRG/MammoRGTool/gz2.json"
+INPUT_EXCEL = "/home/user/MammoRG/MammoRGTool/gz2.xlsx"
+OUTPUT_JSON = "/home/user/MammoRG/MammoRGTool/gz2.json"
 
 def parse_output_to_fields(output):
     """
