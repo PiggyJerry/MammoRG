@@ -1,7 +1,7 @@
 #!/bin/bash
 
 export MODEL_NAME="mammorg"
-export BASE_DIR="/home/jiayi/MammoRG-main"
+export BASE_DIR="/home/user/MammoRG-main"
 export PYTHONPATH=".:$PYTHONPATH"
 STAGE1_SCRIPT="./scripts/stage1.sh"
 STAGE2_ALIGNMENT_SCRIPT="./scripts/stage2_alignment.sh"
