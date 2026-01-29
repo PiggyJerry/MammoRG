@@ -15,7 +15,7 @@ import rrg_eval.rouge
 # from rrg_eval.f1radgraph import F1RadGraphv2
 from rrg_eval.factuality_utils import CONDITIONS
 import sys
-sys.path.append("/home/jiayi/MammoRG")
+sys.path.append("/home/user/MammoRG")
 from MammoRGTool.tool import MammoRGTool
 try:
     import wandb
