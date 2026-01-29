@@ -13,7 +13,7 @@ class Patient_RAG(nn.Module):
         self.adapter1=nn.Linear(embed_dim*4,768)
         self.norm=nn.LayerNorm(embed_dim)
         self.adapter2=nn.Linear(768,embed_dim)
-        with open('/home/jiayi/MammoRG-main/mammorg/llava/model/patient_rag/Train_ChineseBERT_embedding_report.json', 'r') as f:
+        with open('/home/user/MammoRG-main/mammorg/llava/model/patient_rag/Train_ChineseBERT_embedding_report.json', 'r') as f:
             self.report_features = torch.from_numpy(np.array(json.load(f)))
         
         
