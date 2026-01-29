@@ -4,5 +4,5 @@ import torch
 from torch_geometric.data import Data
     
 def build_graph_model(config):
-    return GraphModel(config,'/home/jiayi/MammoRG-main/mammorg/KG.json')
+    return GraphModel(config,'/home/user/MammoRG-main/mammorg/KG.json')
    
