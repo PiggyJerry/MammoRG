@@ -9,7 +9,7 @@ from transformers.trainer import (
 )
 from typing import List, Optional
 import numpy as np
-from .GRPO import *
+
 def maybe_zero_3(param, ignore_status=False, name=None):
     from deepspeed import zero
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
@@ -199,15 +199,14 @@ def compute_aux_f1(preds, labels):
 
     # ---------- status (binary, per-entity) ----------
     for side in ['left', 'right']:
-        gt = labels[f'{side}_status_logits']           # (B,14)
-        logit = preds[f'{side}_status_logits']  # (B,14)
+        gt = labels[f'{side}_status_logits']         
+        logit = preds[f'{side}_status_logits']  
 
         mask = (gt == 0) | (gt == 1)
         if mask.any():
             prob = torch.sigmoid(logit)
             pred = (prob > 0.5).long()
 
-            # 你的标签翻转逻辑：0->1, 1->0
             gt_bin = (gt == 0).long()
 
             f1 = f1_score_binary(
@@ -263,28 +262,44 @@ class LLaVATrainer(Trainer):
         self.reset_epoch_buffers()
     def reset_training_stats(self):
         self.total_loss = 0
-        self.total_rewards = 0
         self.current_step = 0
         self.nan_detected = False
         self.gradient_norms = []
         self.current_step=1
         self.last_epoch_int = -1
-        self.best_f1=0
-        self.cumulative_rewards = 0
-        self.cumulative_steps = 0
-        self.average_reward_history = []
-
-        self.cumulative_loss = 0
-        self.average_loss_history = []
+        self.best_graph_f1 = 0.0
+        self.best_sentence_f1 = 0.0
     
     def reset_epoch_buffers(self):
         self.epoch_graph_preds = []
-        self.epoch_report_preds = []
+        self.epoch_sentence_preds = []
         self.epoch_aux_labels = []
     
     def on_epoch_end_logic(self, model):
-        if not model.get_model().aux:
-            return
+        def save_non_lora_by_keywords(model, keywords, save_path):
+            def get_peft_state_non_lora_maybe_zero_3(named_params, require_grad_only=True):
+                to_return = {k: t for k, t in named_params if "lora_" not in k}
+                if require_grad_only:
+                    to_return = {k: t for k, t in to_return.items() if t.requires_grad}
+                to_return = {
+                    k: maybe_zero_3(v, ignore_status=True).cpu()
+                    for k, v in to_return.items()
+                }
+                return to_return
+
+            state_dict = get_peft_state_non_lora_maybe_zero_3(model.named_parameters())
+
+            filtered_state = {
+                '.'.join(k.split('.')[1:]): v
+                for k, v in state_dict.items()
+                if any(kw in k for kw in keywords)
+            }
+
+            if len(filtered_state) == 0:
+                print(f"⚠️ Warning: No parameters matched {keywords}")
+
+            torch.save(filtered_state, save_path)
+
         def concat_dict_list(dict_list):
             out = {}
             for k in dict_list[0]:
@@ -325,7 +340,7 @@ class LLaVATrainer(Trainer):
                 return batches
         
         image_processor=model.get_model().get_vision_tower().image_processor
-        all_queries = data_loaders['MammoReport_test']('/home/user/MammoRG-main/mammorg_data/split_data/Test.json')
+        all_queries = data_loaders['MammoReport_test']('/home/jiayi/MammoRG/mammorg_data/split_data/Test.json')
         queries = get_chunk(all_queries, 1, 0)
 
         batches = create_batches(queries, 64, False, self.tokenizer)
@@ -350,7 +365,7 @@ class LLaVATrainer(Trainer):
                     images = {}
                     for view in ['R_CC', 'R_MLO', 'L_CC', 'L_MLO']:
                         if view in query['Image_paths']:
-                            image_path = os.path.join('/home/user/MammoRG-main/mammorg_data', query['Image_paths'][view])
+                            image_path = os.path.join('/home/jiayi/MammoRG/mammorg_data', query['Image_paths'][view])
                             image = Image.open(image_path).convert('RGB')
                             image = image_processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
                             images[view] = image.to(next(model.parameters()).dtype)
@@ -363,10 +378,11 @@ class LLaVATrainer(Trainer):
                 batch_labels.append(query['aux_labels'])
             
             aux_labels = {
-                'left_density_logits': torch.cat([torch.tensor(inst['left_density_logits']) for inst in batch_labels]), 
+
+                'left_density_logits': torch.cat([torch.tensor(inst['left_density_logits']) for inst in batch_labels]),  # (2,)
                 'left_birads_logits': torch.cat([torch.tensor(inst['left_birads_logits']) for inst in batch_labels]),
                 'left_status_logits': torch.stack([
-                    torch.tensor(inst['left_status_logits']).view(-1) 
+                    torch.tensor(inst['left_status_logits']).view(-1)  
                     for inst in batch_labels
                 ]), 
                 'right_density_logits': torch.cat([torch.tensor(inst['right_density_logits']) for inst in batch_labels]),
@@ -384,7 +400,7 @@ class LLaVATrainer(Trainer):
                     for inst in batch_labels
                 ]),
                 'modified_by_logits': torch.stack([
-                    torch.tensor(inst['modified_by_logits'])
+                    torch.tensor(inst['modified_by_logits']) 
                     for inst in batch_labels
                 ]),
             }
@@ -409,133 +425,91 @@ class LLaVATrainer(Trainer):
             self.epoch_graph_preds.append(
                 {k: v.detach().cpu() for k, v in model._last_aux_graph_preds.items()}
             )
-            self.epoch_report_preds.append(
-                {k: v.detach().cpu() for k, v in model._last_aux_report_preds.items()}
+            self.epoch_sentence_preds.append(
+                {k: v.detach().cpu() for k, v in model._last_aux_sentence_preds.items()}
             )
             self.epoch_aux_labels.append(
                 {k: v.detach().cpu() for k, v in model._last_aux_labels.items()}
             )
 
         graph_preds = concat_dict_list(self.epoch_graph_preds)
-        report_preds = concat_dict_list(self.epoch_report_preds)
+        sentence_preds = concat_dict_list(self.epoch_sentence_preds)
         aux_labels = concat_dict_list(self.epoch_aux_labels)
 
         graph_f1 = compute_aux_f1(graph_preds, aux_labels)
-        report_f1 = compute_aux_f1(report_preds, aux_labels)
+        sentence_f1 = compute_aux_f1(sentence_preds, aux_labels)
 
         print(f"\nEpoch {self.last_epoch_int} AUX Metrics")
         print(f"Graph F1:    {graph_f1:.4f}")
-        print(f"report F1: {report_f1:.4f}")
-        total_f1=(graph_f1+report_f1)/2
-        if total_f1>self.best_f1:
-            def get_peft_state_non_lora_maybe_zero_3(named_params, require_grad_only=True):
-                to_return = {k: t for k, t in named_params if "lora_" not in k}
-                if require_grad_only:
-                    to_return = {k: t for k, t in to_return.items() if t.requires_grad}
-                to_return = {k: maybe_zero_3(v, ignore_status=True).cpu() for k, v in to_return.items()}
-                return to_return
-            
-            non_lora_state_dict = get_peft_state_non_lora_maybe_zero_3(
-                model.named_parameters()
+        print(f"Sentence F1: {sentence_f1:.4f}")
+
+        # ========== Graph ==========
+        if graph_f1 > self.best_graph_f1:
+            print(f"🔥 New best Graph F1: {graph_f1:.4f}")
+
+            save_non_lora_by_keywords(
+                model=model,
+                keywords=["graph_model", "cross_module", "probing1"],
+                save_path=os.path.join(
+                    self.args.output_dir,
+                    "non_lora_trainables_graph_best.bin"
+                )
             )
-            non_lora_state_dict = {'.'.join(k.split('.')[1:]): v for k, v in non_lora_state_dict.items()}
-            torch.save(non_lora_state_dict, os.path.join(self.args.output_dir, f'non_lora_trainables.bin'))
-            self.best_f1=total_f1
+            self.best_graph_f1 = graph_f1
+
+        # ========== Sentence ==========
+        if sentence_f1 > self.best_sentence_f1:
+            print(f"🔥 New best Sentence F1: {sentence_f1:.4f}")
+
+            save_non_lora_by_keywords(
+                model=model,
+                keywords=["patient_rag", "probing2"],
+                save_path=os.path.join(
+                    self.args.output_dir,
+                    "non_lora_trainables_sentence_best.bin"
+                )
+            )
+            self.best_sentence_f1 = sentence_f1
+
+
         self.reset_epoch_buffers()
-        
+    
     def training_step(self, model, inputs):
-        def unwrap_model(model):
-            if hasattr(model, 'module'):
-                return unwrap_model(model.module)
-            return model
+        loss = super().training_step(model, inputs)
+        if self.current_step!=self.state.global_step+1:
+       
+            current_epoch_int = int(self.state.epoch)
+            if self.args.aux_only:
+                if current_epoch_int > self.last_epoch_int:
+                   
+                    if self.last_epoch_int >= 0:  
+                     
+                        if (self.last_epoch_int) % 2 == 0: 
+                            self.on_epoch_end_logic(model)
+                            merged = {}
+                            graph_model_path=os.path.join(
+                                self.args.output_dir,
+                                "non_lora_trainables_graph_best.bin"
+                            )
+                            if os.path.exists(graph_model_path):
+                                merged.update(torch.load(graph_model_path))
+                            sentence_model_path=os.path.join(
+                                self.args.output_dir,
+                                "non_lora_trainables_sentence_best.bin"
+                            )
+                            if os.path.exists(sentence_model_path):
+                                merged.update(torch.load(sentence_model_path))
+                            torch.save(merged, os.path.join(
+                                self.args.output_dir,
+                                "non_lora_trainables.bin"
+                            ))
 
-        base_model = unwrap_model(model)
-        if base_model.model.reference_model is None:
-            loss = super().training_step(model, inputs)
-            if self.current_step!=self.state.global_step+1:
-                current_epoch_int = int(self.state.epoch)
-                if self.args.aux_only:
-                    if current_epoch_int > self.last_epoch_int:
-                        if self.last_epoch_int >= 0: 
-                            if (self.last_epoch_int) % 2 == 0:
-                                self.on_epoch_end_logic(model)
-                        self.last_epoch_int = current_epoch_int
-                self.total_loss+=loss.item()
-                average_loss=self.total_loss/self.current_step
-                print(f"\nStep {self.state.global_step} Loss: {average_loss}")
-                self.current_step=self.state.global_step+1
-            return loss
-        else:
-            beta = 0.1
-            epsilon = 0.2
-            mu = 3
-            # rollout phase
-            with torch.no_grad():
-                rollout_cache = base_model(**inputs)
-
-            full_input_ids = rollout_cache["full_input_ids"]
-            full_mask = rollout_cache["full_mask"]
-            images_dict = rollout_cache["images_dict"]
-            completion_mask = rollout_cache["completion_mask"]
-            old_log_probs = rollout_cache["old_log_probs"]
-            ref_log_probs = rollout_cache["ref_log_probs"]
-            advantages = rollout_cache["advantages"]
-            rewards = rollout_cache["rewards"]
-
-            current_reward = rewards.mean().item()
-            self.cumulative_rewards += current_reward
-            self.cumulative_steps += 1
-            average_reward = self.cumulative_rewards / self.cumulative_steps
-            self.average_reward_history.append(average_reward)
-
-            logits_to_keep = completion_mask.size(1)
-
-            
-            for ite in range(mu):
-                prepared_input_ids, prepared_attention_mask, prepared_past_key_values, prepared_inputs_embeds, _ = \
-                base_model.model.prepare_inputs_labels_for_multimodal(
-                    full_input_ids, full_mask, None, None, images_dict
-                )
-                
-                current_outputs, current_hidden, current_logits = base_model.model._run_model_and_head(
-                    base_model.model.model, base_model.model.lm_head,
-                    prepared_input_ids, prepared_attention_mask, prepared_past_key_values, prepared_inputs_embeds,
-                    use_cache=False, output_attentions=False, output_hidden_states=False, return_dict=True
-                )
-
-                current_log_probs = selective_log_softmax(
-                    current_logits[:, -logits_to_keep:, :],
-                    full_input_ids[:, -logits_to_keep:]
-                )
-
-                ratio = torch.exp(current_log_probs - old_log_probs)
-                surrogate1 = ratio * advantages
-                surrogate2 = torch.clamp(ratio, 1 - epsilon, 1 + epsilon) * advantages
-                surrogate_loss = torch.min(surrogate1, surrogate2)
-
-                kl_div = torch.exp(ref_log_probs - current_log_probs) - (ref_log_probs - current_log_probs) - 1
-                per_token_loss = surrogate_loss - beta * kl_div
-
-                loss = -((per_token_loss * completion_mask).sum(dim=1) / completion_mask.sum(dim=1)).mean()
-
-                self.optimizer.zero_grad() 
-                self.accelerator.backward(loss)
-                self.accelerator.clip_grad_norm_(model.parameters(), max_norm=0.1)
-                self.optimizer.step() 
-
-                print(f"🌀 GRPO: loss={loss.item():.6f}, KL={kl_div.mean().item():.6f}")
-
-                self.cumulative_loss += loss.detach().item()
-                average_loss = self.cumulative_loss / self.cumulative_steps
-                self.average_loss_history.append(average_loss)
-                print(f"✅ Step {self.state.global_step}: "
-                    f"平均Loss={loss.detach().item():.6f}, "
-                    f"历史平均Loss={average_loss:.6f}, "
-                    f"当前Reward={current_reward:.4f}, "
-                    f"历史平均Reward={average_reward:.4f}, "
-                    f"总步数={self.cumulative_steps}")
-
-            return loss
+                    self.last_epoch_int = current_epoch_int
+            self.total_loss+=loss.item()
+            average_loss=self.total_loss/self.current_step
+            print(f"\nStep {self.state.global_step} Loss: {average_loss}")
+            self.current_step=self.state.global_step+1
+        return loss
 
     def _get_train_sampler(self) -> Optional[torch.utils.data.Sampler]:
         if self.train_dataset is None or not has_length(self.train_dataset):
