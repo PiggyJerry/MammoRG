@@ -14,9 +14,8 @@ from sklearn.preprocessing import label_binarize
 from typing import Dict, List, Union
 import sys
 current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 from correction import process_samples
 from models.rel_model import RelModel
 from transformers import BertTokenizer
