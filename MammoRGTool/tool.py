@@ -58,102 +58,99 @@ birads_priority = {
     'ⅰ': 1, 'ⅱ': 2, 'ⅲ': 3, 'ⅳ': 4, 'ⅴ': 5, 'ⅵ': 6
 }
 
-def rule_based_get_birads(conclusion, laterality):
-    if pd.isna(conclusion):
-        return None
 
-    full_birads_pattern = re.compile(
-        r'(?:BI\s*-\s*RADS|BI\s*RADS|BI/RADS|分类)[-]?\s*[:：]?\s*'
-        r'([IVXivxⅠⅡⅢⅣⅤⅥⅰⅱⅲⅳⅴⅵ]+|\d+[a-cA-C]?)',
+def rule_based_get_birads(conclusion, laterality):
+    if pd.isna(conclusion) or conclusion is None:
+        return None
+    conclusion = str(conclusion)
+
+    # 1) 只用 Impression 段，避免 Findings 的“左乳/右乳/双乳”干扰侧别关联
+    m = re.search(r'Impression\s*[:：]', conclusion, flags=re.IGNORECASE)
+    text = conclusion[m.end():] if m else conclusion
+
+    # 2) 更宽松的 BI-RADS 识别：BI-RADS分类：3 / BI RADS 3 / BI/RADS 3 / Bi-Rads 4A / BIRADS 2 / 分类：2
+    birads_pattern = re.compile(
+        r'(?:'
+        r'BI\s*[-/\s]?\s*RADS'      # BI-RADS / BI RADS / BI/RADS
+        r'|BIRADS'                  # BIRADS
+        r'|Bi\s*[-/\s]?\s*Rads'     # Bi-Rads / Bi Rads
+        r'|分类'
+        r')'
+        r'(?:\s*分类)?\s*[:：]?\s*'
+        r'([IVXivxⅠⅡⅢⅣⅤⅥⅰⅱⅲⅳⅴⅵ]+|\d+(?:[a-cA-C])?)',
         re.IGNORECASE
     )
 
     side_keywords = {
-        'left': ['左', '左乳'],
-        'right': ['右', '右乳'],
-        'double': ['双乳', '双侧', '双侧乳']
+        'left':   ['左乳', '左'],
+        'right':  ['右乳', '右'],
+        'double': ['双侧乳', '双乳', '双侧'],
     }
 
+    # 3) 找 text 内所有侧别位置（长词优先）
     side_positions = []
-    for side_type, keywords in side_keywords.items():
-        for keyword in keywords:
-            for match in re.finditer(keyword, conclusion):
-                side_positions.append({
-                    'pos': match.start(),
-                    'type': side_type,
-                    'keyword': keyword
-                })
+    for side_type, kws in side_keywords.items():
+        for kw in sorted(kws, key=len, reverse=True):
+            for sm in re.finditer(re.escape(kw), text):
+                side_positions.append({'pos': sm.start(), 'type': side_type})
     side_positions.sort(key=lambda x: x['pos'])
 
+    # 4) 找所有 BI-RADS，并做标准化 + 打分
     birads_matches = []
-    for match in full_birads_pattern.finditer(conclusion):
-        full_text = match.group(0) 
-        
-        birads_class = match.group(1).upper()
-        if birads_class in roman_to_arabic:
-            birads_num = str(roman_to_arabic[birads_class])
-        elif re.match(r'\d+[A-C]', birads_class):
-            birads_num = birads_class.lower()
+    for bm in birads_pattern.finditer(text):
+        raw = bm.group(1).upper()
+
+        if raw in roman_to_arabic:
+            norm_num = str(roman_to_arabic[raw])
+        elif re.match(r'^\d+[A-C]$', raw):
+            norm_num = raw.lower()   # 4A -> 4a 用于 priority
         else:
-            birads_num = birads_class
-            
+            norm_num = raw
+
         birads_matches.append({
-            'full_text': full_text.strip(), 
-            'text': birads_num, 
-            'priority': birads_priority.get(birads_num, -1),
-            'start': match.start(),
-            'end': match.end()
+            'norm_num': norm_num,  # 用于优先级
+            'priority': birads_priority.get(norm_num, -1),
+            'start': bm.start(),
         })
-    
 
-    birads_with_sides = []
-    for birads in birads_matches:
-
-        preceding_sides = [s for s in side_positions if s['pos'] < birads['start']]
-        if preceding_sides:
-            nearest_side = max(preceding_sides, key=lambda x: x['pos'])
-            
-
-            birads_with_sides.append({
-                'full_text': birads['full_text'], 
-                'birads': birads['text'],  
-                'priority': birads['priority'],
-                'side_type': nearest_side['type'],
-                'side_keyword': nearest_side['keyword'],
-                'side_pos': nearest_side['pos'],
-                'birads_pos': birads['start'],
-                'context': conclusion[nearest_side['pos']:birads['end']]
-            })
-        else:
-            birads_with_sides.append({
-                'full_text': birads['full_text'], 
-                'birads': birads['text'], 
-                'priority': birads['priority'],
-                'side_type': None,
-                'side_keyword': None,
-                'side_pos': None,
-                'birads_pos': birads['start'],
-                'context': None
-            })
-
-    valid_birads = []
-    if laterality == 'L':
-        left_birads = [b for b in birads_with_sides if b['side_type'] == 'left']
-        if left_birads:
-            valid_birads = left_birads
-        else:
-            valid_birads = [b for b in birads_with_sides if b['side_type'] == 'double']
-    elif laterality == 'R':
-        right_birads = [b for b in birads_with_sides if b['side_type'] == 'right']
-        if right_birads:
-            valid_birads = right_birads
-        else:
-            valid_birads = [b for b in birads_with_sides if b['side_type'] == 'double']
-
-    if not valid_birads:
+    if not birads_matches:
         return None
 
-    return max(valid_birads, key=lambda x: x['priority'])['full_text']
+    # 5) 侧别关联：只在 Impression 段里做“前面最近侧别”
+    birads_with_sides = []
+    for b in birads_matches:
+        preceding = [s for s in side_positions if s['pos'] < b['start']]
+        nearest = max(preceding, key=lambda x: x['pos']) if preceding else None
+        birads_with_sides.append({
+            'norm_num': b['norm_num'],
+            'priority': b['priority'],
+            'side_type': nearest['type'] if nearest else None
+        })
+
+    # 6) laterality 过滤（优先单侧，其次 double）
+    if laterality == 'L':
+        valid = [x for x in birads_with_sides if x['side_type'] == 'left'] \
+                or [x for x in birads_with_sides if x['side_type'] == 'double']
+    elif laterality == 'R':
+        valid = [x for x in birads_with_sides if x['side_type'] == 'right'] \
+                or [x for x in birads_with_sides if x['side_type'] == 'double']
+    else:
+        return None
+
+    if not valid:
+        return None
+
+    best = max(valid, key=lambda x: x['priority'])
+
+    # 7) 返回标准类名（必须匹配你的 BI_RADS_CLASSES）
+    # norm_num 可能是 '4a' -> 输出 '4A'
+    num = best['norm_num']
+    if re.match(r'^\d+[a-c]$', num):
+        num_out = num[:-1] + num[-1].upper()
+    else:
+        num_out = num
+
+    return f"Bi-Rads {num_out}"
 
 
 def rule_based_get_density(conclusion, laterality):
