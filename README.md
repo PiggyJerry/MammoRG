@@ -33,7 +33,7 @@ python -m pip install -r requirements.txt
 ## Train
 Before running the commands below, you need to have the data, and the above preparation ready. 
 
-**0.1 Data**
+**Data**
 
 Since our training set is a private dataset and cannot be made public, if you wish to use your own dataset.
 First, you need to organize your dataset into an Excel file. It must include the following four columns: ID, Findings, Impression, and image_paths.
@@ -111,7 +111,7 @@ You can use the [processing code](https://github.com/PiggyJerry/MammoRG/blob/mai
    ...
 }
 ````
-**Notes before proceeding:** 
+**Notes before proceeding** 
 - Change the paths in the scripts according to where you output the data.
 
 ### Start training
