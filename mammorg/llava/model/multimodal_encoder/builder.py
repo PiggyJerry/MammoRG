@@ -1,6 +1,4 @@
 import os
-from .clip_encoder import CLIPVisionTower
-from .open_clip_encoder import OpenCLIPVisionTower
 from .efficientnet_custom import EfficientNet
 import torch
 def build_vision_tower(vision_tower_cfg, **kwargs):
