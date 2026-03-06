@@ -25,6 +25,10 @@ conda activate mammorg
 
 pip install torch torchvision
 python -m pip install -r requirements.txt
+
+### 4. Install FlashAttention
+
+pip install flash-attn --no-build-isolation
 ```
 ## Preparation
 - A pre-trained LLaVA-Mammo, please download the weight from [A Benchmark for Breast Cancer Screening and Diagnosis in Mammogram Visual Question Answering](https://drive.google.com/file/d/1uFCrOTbsvug8YZoHKR7wlvoTSwzB32EY/view?usp=sharing) and unzip it, then rename the forder to `LLaVA-Mammo-checkpoint`. Remember to change the related path in the code.
