@@ -23,6 +23,7 @@ cd MammoRG
 conda create -n mammorg python==3.9
 conda activate mammorg
 
+pip install torch torchvision
 python -m pip install -r requirements.txt
 ```
 ## Preparation
