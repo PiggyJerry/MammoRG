@@ -225,9 +225,9 @@ def data_loader_mammo(data_path, split):
     for index,info in data.items():
         breast_assessment = info["Breast_assessment"]
         left_density_idx = [density_to_idx[breast_assessment["Left_breast"]["Density"]]]
-        left_birads_idx = [birads_to_idx[breast_assessment["Left_breast"]["Bi-Rads"]]]
+        left_birads_idx = [birads_to_idx[breast_assessment["Left_breast"]["Bi-Rads"].replace('BI-RADS','Bi-Rads')]]
         right_density_idx = [density_to_idx[breast_assessment["Right_breast"]["Density"]]]
-        right_birads_idx = [birads_to_idx[breast_assessment["Right_breast"]["Bi-Rads"]]]
+        right_birads_idx = [birads_to_idx[breast_assessment["Right_breast"]["Bi-Rads"].replace('BI-RADS','Bi-Rads')]]
 
         left_entities = breast_assessment["Left_breast"]["Entities"]
         left_state_indices = [entity_to_idx[left_entities[name]] for name in ENTITY_NAMES]
@@ -242,7 +242,7 @@ def data_loader_mammo(data_path, split):
 
         for relation in relations:
             subject, relation_type, obj = relation
-            
+            obj = obj.replace('BI-RADS','Bi-Rads')
             subject_idx = ENTITY_NAMES.index(subject)
             
             if relation_type == "Located_at":
