@@ -20,7 +20,7 @@ def maybe_zero_3(param, ignore_status=False, name=None):
         with zero.GatheredParameters([param]):
             param = param.data.detach().cpu().clone()
     else:
-        param = param.detach().cpu().clone()
+        param = param.detach().cpu().clone() 
     return param
 
 
@@ -199,14 +199,13 @@ def compute_aux_f1(preds, labels):
 
     # ---------- status (binary, per-entity) ----------
     for side in ['left', 'right']:
-        gt = labels[f'{side}_status_logits']         
-        logit = preds[f'{side}_status_logits']  
+        gt = labels[f'{side}_status_logits']          
+        logit = preds[f'{side}_status_logits'] 
 
         mask = (gt == 0) | (gt == 1)
         if mask.any():
             prob = torch.sigmoid(logit)
             pred = (prob > 0.5).long()
-
             gt_bin = (gt == 0).long()
 
             f1 = f1_score_binary(
@@ -258,7 +257,7 @@ class LLaVATrainer(Trainer):
     def __init__(self, tokenizer=None, **kwargs):
         super().__init__(**kwargs)
         self.reset_training_stats()
-        self.tokenizer = tokenizer  
+        self.tokenizer = tokenizer 
         self.reset_epoch_buffers()
     def reset_training_stats(self):
         self.total_loss = 0
@@ -267,8 +266,7 @@ class LLaVATrainer(Trainer):
         self.gradient_norms = []
         self.current_step=1
         self.last_epoch_int = -1
-        self.best_graph_f1 = 0.0
-        self.best_sentence_f1 = 0.0
+        self.best_f1=0
     
     def reset_epoch_buffers(self):
         self.epoch_graph_preds = []
@@ -276,30 +274,8 @@ class LLaVATrainer(Trainer):
         self.epoch_aux_labels = []
     
     def on_epoch_end_logic(self, model):
-        def save_non_lora_by_keywords(model, keywords, save_path):
-            def get_peft_state_non_lora_maybe_zero_3(named_params, require_grad_only=True):
-                to_return = {k: t for k, t in named_params if "lora_" not in k}
-                if require_grad_only:
-                    to_return = {k: t for k, t in to_return.items() if t.requires_grad}
-                to_return = {
-                    k: maybe_zero_3(v, ignore_status=True).cpu()
-                    for k, v in to_return.items()
-                }
-                return to_return
-
-            state_dict = get_peft_state_non_lora_maybe_zero_3(model.named_parameters())
-
-            filtered_state = {
-                '.'.join(k.split('.')[1:]): v
-                for k, v in state_dict.items()
-                if any(kw in k for kw in keywords)
-            }
-
-            if len(filtered_state) == 0:
-                print(f"⚠️ Warning: No parameters matched {keywords}")
-
-            torch.save(filtered_state, save_path)
-
+        if not model.get_model().aux:
+            return
         def concat_dict_list(dict_list):
             out = {}
             for k in dict_list[0]:
@@ -340,7 +316,7 @@ class LLaVATrainer(Trainer):
                 return batches
         
         image_processor=model.get_model().get_vision_tower().image_processor
-        all_queries = data_loaders['MammoReport_test']('/home/jiayi/MammoRG/mammorg_data/split_data/Test.json')
+        all_queries = data_loaders['MammoReport_test']('/home/user/MammoRG-main/mammorg_data/split_data/Test.json')
         queries = get_chunk(all_queries, 1, 0)
 
         batches = create_batches(queries, 64, False, self.tokenizer)
@@ -365,7 +341,7 @@ class LLaVATrainer(Trainer):
                     images = {}
                     for view in ['R_CC', 'R_MLO', 'L_CC', 'L_MLO']:
                         if view in query['Image_paths']:
-                            image_path = os.path.join('/home/jiayi/MammoRG/mammorg_data', query['Image_paths'][view])
+                            image_path = os.path.join('/home/user/MammoRG-main/mammorg_data', query['Image_paths'][view])
                             image = Image.open(image_path).convert('RGB')
                             image = image_processor.preprocess(image, return_tensors='pt')['pixel_values'][0]
                             images[view] = image.to(next(model.parameters()).dtype)
@@ -378,13 +354,13 @@ class LLaVATrainer(Trainer):
                 batch_labels.append(query['aux_labels'])
             
             aux_labels = {
-
-                'left_density_logits': torch.cat([torch.tensor(inst['left_density_logits']) for inst in batch_labels]),  # (2,)
+          
+                'left_density_logits': torch.cat([torch.tensor(inst['left_density_logits']) for inst in batch_labels]), 
                 'left_birads_logits': torch.cat([torch.tensor(inst['left_birads_logits']) for inst in batch_labels]),
                 'left_status_logits': torch.stack([
                     torch.tensor(inst['left_status_logits']).view(-1)  
                     for inst in batch_labels
-                ]), 
+                ]),  
                 'right_density_logits': torch.cat([torch.tensor(inst['right_density_logits']) for inst in batch_labels]),
                 'right_birads_logits': torch.cat([torch.tensor(inst['right_birads_logits']) for inst in batch_labels]),
                 'right_status_logits': torch.stack([
@@ -392,11 +368,11 @@ class LLaVATrainer(Trainer):
                     for inst in batch_labels
                 ]),
                 'located_at_logits': torch.stack([
-                    torch.tensor(inst['located_at_logits']) 
+                    torch.tensor(inst['located_at_logits'])  
                     for inst in batch_labels
                 ]),
                 'suggestive_of_logits': torch.stack([
-                    torch.tensor(inst['suggestive_of_logits']) 
+                    torch.tensor(inst['suggestive_of_logits'])  
                     for inst in batch_labels
                 ]),
                 'modified_by_logits': torch.stack([
@@ -439,71 +415,32 @@ class LLaVATrainer(Trainer):
         graph_f1 = compute_aux_f1(graph_preds, aux_labels)
         sentence_f1 = compute_aux_f1(sentence_preds, aux_labels)
 
-        print(f"\nEpoch {self.last_epoch_int} AUX Metrics")
-        print(f"Graph F1:    {graph_f1:.4f}")
-        print(f"Sentence F1: {sentence_f1:.4f}")
-
-        # ========== Graph ==========
-        if graph_f1 > self.best_graph_f1:
-            print(f"🔥 New best Graph F1: {graph_f1:.4f}")
-
-            save_non_lora_by_keywords(
-                model=model,
-                keywords=["graph_model", "cross_module", "probing1"],
-                save_path=os.path.join(
-                    self.args.output_dir,
-                    "non_lora_trainables_graph_best.bin"
-                )
+        total_f1=(graph_f1+sentence_f1)/2
+        if total_f1>self.best_f1:
+            def get_peft_state_non_lora_maybe_zero_3(named_params, require_grad_only=True):
+                to_return = {k: t for k, t in named_params if "lora_" not in k}
+                if require_grad_only:
+                    to_return = {k: t for k, t in to_return.items() if t.requires_grad}
+                to_return = {k: maybe_zero_3(v, ignore_status=True).cpu() for k, v in to_return.items()}
+                return to_return
+            
+            non_lora_state_dict = get_peft_state_non_lora_maybe_zero_3(
+                model.named_parameters()
             )
-            self.best_graph_f1 = graph_f1
-
-        # ========== Sentence ==========
-        if sentence_f1 > self.best_sentence_f1:
-            print(f"🔥 New best Sentence F1: {sentence_f1:.4f}")
-
-            save_non_lora_by_keywords(
-                model=model,
-                keywords=["patient_rag", "probing2"],
-                save_path=os.path.join(
-                    self.args.output_dir,
-                    "non_lora_trainables_sentence_best.bin"
-                )
-            )
-            self.best_sentence_f1 = sentence_f1
-
-
+            non_lora_state_dict = {'.'.join(k.split('.')[1:]): v for k, v in non_lora_state_dict.items()}
+            torch.save(non_lora_state_dict, os.path.join(self.args.output_dir, f'non_lora_trainables.bin'))
+            self.best_f1=total_f1
         self.reset_epoch_buffers()
-    
+        
     def training_step(self, model, inputs):
         loss = super().training_step(model, inputs)
         if self.current_step!=self.state.global_step+1:
-       
             current_epoch_int = int(self.state.epoch)
             if self.args.aux_only:
                 if current_epoch_int > self.last_epoch_int:
-                   
                     if self.last_epoch_int >= 0:  
-                     
                         if (self.last_epoch_int) % 2 == 0: 
                             self.on_epoch_end_logic(model)
-                            merged = {}
-                            graph_model_path=os.path.join(
-                                self.args.output_dir,
-                                "non_lora_trainables_graph_best.bin"
-                            )
-                            if os.path.exists(graph_model_path):
-                                merged.update(torch.load(graph_model_path))
-                            sentence_model_path=os.path.join(
-                                self.args.output_dir,
-                                "non_lora_trainables_sentence_best.bin"
-                            )
-                            if os.path.exists(sentence_model_path):
-                                merged.update(torch.load(sentence_model_path))
-                            torch.save(merged, os.path.join(
-                                self.args.output_dir,
-                                "non_lora_trainables.bin"
-                            ))
-
                     self.last_epoch_int = current_epoch_int
             self.total_loss+=loss.item()
             average_loss=self.total_loss/self.current_step
