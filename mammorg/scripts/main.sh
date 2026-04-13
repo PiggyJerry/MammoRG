@@ -6,7 +6,6 @@ export PYTHONPATH=".:$PYTHONPATH"
 STAGE1_SCRIPT="./scripts/stage1.sh"
 STAGE2_ALIGNMENT_SCRIPT="./scripts/stage2_alignment.sh"
 STAGE2_FINETUNE_SCRIPT="./scripts/stage2_finetune.sh"
-STAGE3_SCRIPT="./scripts/stage3.sh"
 EVAL_SCRIPT="./scripts/eval.sh"
 
 check_script() {
@@ -18,7 +17,6 @@ check_script() {
 check_script "$STAGE1_SCRIPT"
 check_script "$STAGE2_ALIGNMENT_SCRIPT"
 check_script "$STAGE2_FINETUNE_SCRIPT"
-check_script "$STAGE3_SCRIPT"
 check_script "$EVAL_SCRIPT"
 
 prepare_script() {
@@ -32,7 +30,6 @@ prepare_script() {
 prepare_script "$STAGE1_SCRIPT"
 prepare_script "$STAGE2_ALIGNMENT_SCRIPT"
 prepare_script "$STAGE2_FINETUNE_SCRIPT"
-prepare_script "$STAGE3_SCRIPT"
 prepare_script "$EVAL_SCRIPT"
 
 echo "================================"
@@ -55,14 +52,6 @@ echo "================================"
 echo "Supervised Fine-Tuning Stage (Stage 2 Fine-Tune)"
 echo "================================"
 if ! "$STAGE2_FINETUNE_SCRIPT"; then
-    echo "Failed"
-    exit 1
-fi
-
-echo "================================"
-echo "Reinforcement Learning Stage (Stage 3)"
-echo "================================"
-if ! "$STAGE3_SCRIPT"; then
     echo "Failed"
     exit 1
 fi
