@@ -21,7 +21,6 @@ import json
 import logging
 import pathlib
 from typing import Dict, Optional, Sequence, List
-import sys
 
 import torch
 import torch.nn as nn
@@ -65,8 +64,6 @@ class ModelArguments:
     mm_use_im_patch_token: bool = field(default=True)
     mm_vision_select_feature: Optional[str] = field(default="patch")
     aux: bool = field(default=False)
-    scs: bool = field(default=False)
-    loaded_dir: Optional[str] = field(default=None)
 
 
 @dataclass
@@ -732,11 +729,6 @@ class LazySupervisedDataset(Dataset):
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         sources = self.list_data_dict[i]
         aux_labels=sources['aux_labels']
-        origin_info = {
-            'prompt': self.list_data_dict[i]['conversations'][0]['value'],
-            'image_paths': self.list_data_dict[i]['Image_paths'],
-            'label': self.list_data_dict[i]['conversations'][1]['value']
-            }
         if isinstance(i, int):
             sources = [sources]
         assert len(sources) == 1, "Don't know why it is wrapped to a list"  # FIXME
@@ -746,7 +738,7 @@ class LazySupervisedDataset(Dataset):
             processor = self.data_args.image_processor
             images = {}
             
-            for view in ['R_CC', 'R_MLO', 'L_CC', 'L_MLO']:  # 确保固定顺序处理4个视图
+            for view in ['R_CC', 'R_MLO', 'L_CC', 'L_MLO']: 
                 if view in image_file:
                     image = open_image_with_retry(os.path.join(image_folder, image_file[view]))
                     if image is None:
@@ -781,20 +773,20 @@ class LazySupervisedDataset(Dataset):
             has_image=('Image_paths' in self.list_data_dict[i]))
         if isinstance(i, int):
             data_dict = data_dict = dict(
-                input_ids=data_dict["input_ids"][0],  # (seq_len,)
-                labels=data_dict["labels"][0],        # (seq_len,)
-                origin_infos=origin_info,
+                input_ids=data_dict["input_ids"][0],  
+                labels=data_dict["labels"][0],     
                 aux_labels={
-                    'left_density_logits': torch.tensor(aux_labels['left_density_logits'], dtype=torch.long),       
+                    'left_density_logits': torch.tensor(aux_labels['left_density_logits'], dtype=torch.long),    
                     'left_birads_logits': torch.tensor(aux_labels['left_birads_logits'], dtype=torch.long),     
-                    'left_status_logits': torch.tensor(aux_labels['left_status_logits'], dtype=torch.long),  
-                    'right_density_logits': torch.tensor(aux_labels['right_density_logits'], dtype=torch.long),       
+                    'left_status_logits': torch.tensor(aux_labels['left_status_logits'], dtype=torch.long), 
+                    'right_density_logits': torch.tensor(aux_labels['right_density_logits'], dtype=torch.long),      
                     'right_birads_logits': torch.tensor(aux_labels['right_birads_logits'], dtype=torch.long),  
                     'right_status_logits': torch.tensor(aux_labels['right_status_logits'], dtype=torch.long), 
                     'located_at_logits': aux_labels['located_at_logits'],
                     'suggestive_of_logits': aux_labels['suggestive_of_logits'],
                     'modified_by_logits': aux_labels['modified_by_logits']
                 },
+                # relation_labels=relation_labels
             )
 
         # image exist in the data
@@ -815,8 +807,8 @@ class DataCollatorForSupervisedDataset(object):
     tokenizer: transformers.PreTrainedTokenizer
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        input_ids, labels,  origin_infos, aux_labels = tuple([instance[key] for instance in instances]
-                                  for key in ("input_ids", "labels", "origin_infos", "aux_labels"))
+        input_ids, labels, aux_labels = tuple([instance[key] for instance in instances]
+                                  for key in ("input_ids", "labels", "aux_labels"))
         input_ids = torch.nn.utils.rnn.pad_sequence(
             input_ids,
             batch_first=True,
@@ -827,10 +819,10 @@ class DataCollatorForSupervisedDataset(object):
         input_ids = input_ids[:, :self.tokenizer.model_max_length]
         labels = labels[:, :self.tokenizer.model_max_length]
         aux_labels = {
-            'left_density_logits': torch.cat([inst['aux_labels']['left_density_logits'] for inst in instances]),
+            'left_density_logits': torch.cat([inst['aux_labels']['left_density_logits'] for inst in instances]), 
             'left_birads_logits': torch.cat([inst['aux_labels']['left_birads_logits'] for inst in instances]),
             'left_status_logits': torch.stack([
-                inst['aux_labels']['left_status_logits'].view(-1)  
+                inst['aux_labels']['left_status_logits'].view(-1) 
                 for inst in instances
             ]), 
             'right_density_logits': torch.cat([inst['aux_labels']['right_density_logits'] for inst in instances]),
@@ -844,11 +836,11 @@ class DataCollatorForSupervisedDataset(object):
                 for inst in instances
             ]),
             'suggestive_of_logits': torch.stack([
-                inst['aux_labels']['suggestive_of_logits'] 
+                inst['aux_labels']['suggestive_of_logits']  
                 for inst in instances
             ]),
             'modified_by_logits': torch.stack([
-                inst['aux_labels']['modified_by_logits'] 
+                inst['aux_labels']['modified_by_logits']
                 for inst in instances
             ]),
         }
@@ -856,7 +848,6 @@ class DataCollatorForSupervisedDataset(object):
             input_ids=input_ids,
             labels=labels,
             attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
-            origin_infos=origin_infos,
             aux_labels=aux_labels,
         )
 
@@ -871,6 +862,7 @@ class DataCollatorForSupervisedDataset(object):
                 )
                 for x in images_list
             ):
+                # 如果所有图像形状一致，可以堆叠每个视图的图像
                 batch_images = {
                     'R_CC': torch.stack([x['R_CC'] for x in images_list]),
                     'R_MLO': torch.stack([x['R_MLO'] for x in images_list]),
@@ -879,6 +871,7 @@ class DataCollatorForSupervisedDataset(object):
                 }
                 batch['images'] = batch_images
             else:
+                # 如果形状不一致，直接保留原始列表
                 batch['images'] = images_list
         return batch
 
@@ -984,9 +977,8 @@ def train():
                 model.to(torch.bfloat16)
             if training_args.fp16:
                 model.to(torch.float16)
-        if model_args.scs!=True:
-            rank0_print("Adding LoRA adapters...")
-            model = get_peft_model(model, lora_config)
+        rank0_print("Adding LoRA adapters...")
+        model = get_peft_model(model, lora_config)
         
     if 'mpt' in model_args.model_name_or_path:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -1018,6 +1010,7 @@ def train():
             conversation_lib.default_conversation = conversation_lib.conv_templates[model_args.version]
         else:
             conversation_lib.default_conversation = conversation_lib.conv_templates["vicuna_v1"]
+
     smart_tokenizer_and_embedding_resize_normal(
                 tokens_list=SPECIAL_PHRASES,
                 tokenizer=tokenizer,
@@ -1082,28 +1075,7 @@ def train():
     data_module = make_supervised_data_module(tokenizer=tokenizer,
                                               data_args=data_args)
     
-    if model_args.pretrain:
-        non_lora_trainables = torch.load(model_args.pretrain, map_location='cpu')
-        for k, v in non_lora_trainables.items():
-            print(f"{k}: {v.shape}")
-        if training_args.lora_enable:
-            non_lora_trainables = {'base_model.model.'+k: v for k, v in non_lora_trainables.items()}
-        load_result = model.load_state_dict(non_lora_trainables, strict=False)
-        print('=' * 50)
-        print('Successfully loaded parameters:')
-        for key in non_lora_trainables.keys():
-            if key not in load_result.missing_keys:
-                print(f'  ✓ {key}')
-
-        print('\nMissing keys:')
-        for key in load_result.missing_keys:
-            print(f'  ✗ {key}')
-
-        print('\nUnexpected keys:')
-        for key in load_result.unexpected_keys:
-            print(f'  ? {key}')
-        print('=' * 50)
-    if model_args.aux:#stage1
+    if model_args.aux:
         training_args.aux_only=True
         model.get_model().aux=True
         model.requires_grad_(False)
@@ -1115,7 +1087,7 @@ def train():
             p.requires_grad = True
         for p in model.get_model().patient_rag.parameters():
             p.requires_grad = True
-    elif not training_args.lora_enable:#stage2
+    elif not training_args.lora_enable:
         for name, module in model.named_modules():
             if 'lm_head' in name or 'embed_tokens' in name:
                 module.weight.requires_grad = True
@@ -1132,10 +1104,15 @@ def train():
             p.requires_grad = False
         for p in model.get_model().patient_rag.parameters():
             p.requires_grad = False
-    if training_args.lora_enable:#stage3
+    if training_args.lora_enable:
         for name, module in model.named_modules():
             if 'lm_head' in name or 'embed_tokens' in name:
-                module.weight.requires_grad = False
+                module.weight.requires_grad = True
+                num_new_tokens = len(SPECIAL_PHRASES)
+                module.weight.register_hook(lambda grad: grad * torch.cat([
+                    torch.zeros_like(grad[:-num_new_tokens]), 
+                    torch.ones_like(grad[-num_new_tokens:])
+                ], dim=0))     
                 
         for p in model.get_model().cross_module.parameters():
             p.requires_grad = False
@@ -1146,75 +1123,12 @@ def train():
         for p in model.get_model().patient_rag.parameters():
             p.requires_grad = False
     
-    if model_args.scs==True:
-        sys.path.append("/home/user/MammoRG-main")
-        from MammoRGTool.tool import MammoRGTool
-        model.tool=MammoRGTool()
-        
-        for name, param in model.named_parameters():
-            param.requires_grad = False
-            
-        if os.path.exists(os.path.join(model_args.loaded_dir, 'non_lora_trainables.bin')):
-            print("Loading my stage1 non-LoRA trainables...")
-            non_lora_trainables = torch.load(os.path.join(model_args.loaded_dir, 'non_lora_trainables.bin'), map_location="cpu")
-            non_lora_trainables = {(k[11:] if k.startswith('base_model.') else k): v for k, v in non_lora_trainables.items()}
-            if any(k.startswith('model.model.') for k in non_lora_trainables):
-                non_lora_trainables = {(k[6:] if k.startswith('model.') else k): v for k, v in non_lora_trainables.items()}
-            missing, unexpected = model.load_state_dict(non_lora_trainables, strict=False)
-            
-            
-        from peft import PeftModel
-        
-        if os.path.exists(model_args.loaded_dir):
-            model = PeftModel.from_pretrained(model, model_args.loaded_dir)
-            print("My LoRA loaded.")
-            
-        for name, param in model.named_parameters():
-            if 'lora_' in name:
-                param.requires_grad = True
-            
-        for name, module in model.named_modules():
-            if 'lm_head' in name or 'embed_tokens' in name:
-                module.weight.requires_grad = False
-        for p in model.get_model().mm_projector1.parameters():
-            p.requires_grad = True
-        for p in model.get_model().mm_projector2.parameters():
-            p.requires_grad = True
-        for p in model.get_model().cross_module.parameters():
-            p.requires_grad = False
-        for p in model.get_model().graph_model.parameters():
-            p.requires_grad = False
-        for p in model.get_model().probing.parameters():
-            p.requires_grad = False
-        for p in model.get_model().patient_rag.parameters():
-            p.requires_grad = False
-        
-        with torch.no_grad():
-            model_copy = copy.deepcopy(model)
-            merged_model = model_copy.merge_and_unload() 
-            model.model.reference_model = copy.deepcopy(merged_model.model).eval()
-            model.model.ref_lm_head = copy.deepcopy(merged_model.lm_head).eval()
-            del merged_model
-       
-        for p in model.model.reference_model.parameters():
-            p.requires_grad_(False)
-        print(">>> reference_model type:", type(model.model.reference_model))
-        for p in model.model.ref_lm_head.parameters():
-            p.requires_grad_(False)
-        print(">>> ref_lm_head type:", type(model.model.ref_lm_head))
-
-    for name, p in model.named_parameters():
-        if p.requires_grad:
-            print(f"Trainable parameters: {name}, shape: {p.shape}")
-    
     trainer = LLaVATrainer(model=model,
                     tokenizer=tokenizer,
                     args=training_args,
                     **data_module)
 
     sampler = trainer._get_train_sampler()
-    print(f"Sampler type: {type(sampler)}")
-
     trainer.train()
     trainer.save_state()
 
@@ -1230,7 +1144,7 @@ def train():
         if model_args.pretrain:
             pretrain_state_dict = torch.load(model_args.pretrain, map_location='cpu')
             pretrain_state_dict = {f'base_model.model.{k}': v for k, v in pretrain_state_dict.items()}
-                       
+            
             for k, v in pretrain_state_dict.items():
                 if k not in non_lora_state_dict:
                     non_lora_state_dict[k] = v
@@ -1241,24 +1155,6 @@ def train():
                 model.save_pretrained(training_args.output_dir, state_dict=state_dict)
             torch.save(non_lora_state_dict, os.path.join(training_args.output_dir, 'non_lora_trainables.bin'))
     
-    elif model_args.scs:
-        state_dict = get_peft_state_maybe_zero_3(
-            model.named_parameters(), training_args.lora_bias
-        )
-        non_lora_state_dict = get_peft_state_non_lora_maybe_zero_3(
-            model.named_parameters()
-        )
-        if model_args.loaded_dir:
-            pretrain_state_dict = torch.load(os.path.join(model_args.loaded_dir, 'non_lora_trainables.bin'), map_location='cpu')
-            for k, v in pretrain_state_dict.items():
-                if k not in non_lora_state_dict:
-                    non_lora_state_dict[k] = v
-
-        if training_args.local_rank == 0 or training_args.local_rank == -1:
-            model.config.save_pretrained(training_args.output_dir)
-            if model_args.scs:
-                model.save_pretrained(training_args.output_dir, state_dict=state_dict)
-            torch.save(non_lora_state_dict, os.path.join(training_args.output_dir, 'non_lora_trainables.bin'))
     elif model_args.aux!=True:
             
         non_lora_state_dict = get_peft_state_non_lora_maybe_zero_3(
@@ -1269,9 +1165,9 @@ def train():
             for k, v in pretrain_state_dict.items():
                 if k not in non_lora_state_dict:
                     non_lora_state_dict[k] = v
-
         if training_args.local_rank == 0 or training_args.local_rank == -1:
             torch.save(non_lora_state_dict, os.path.join(training_args.output_dir, 'non_lora_trainables.bin'))
+
 
 
 if __name__ == "__main__":
