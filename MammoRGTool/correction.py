@@ -14,11 +14,11 @@ def convert_roman_to_arabic(roman):
 
 replacement_rules = {
         r'(?i)bi[-/ ]?rads\s*[:：]?\s*([ivxⅰ-ⅵⅠ-Ⅵ]+)\s*-\s*([ivxⅰ-ⅵⅠ-Ⅵ]+)':
-            lambda m: f"Bi-Rads {convert_roman_to_arabic(m.group(1))}-{convert_roman_to_arabic(m.group(2))}",
+            lambda m: f"BI-RADS {convert_roman_to_arabic(m.group(1))}-{convert_roman_to_arabic(m.group(2))}",
         
         r'(?i)(bi[-/ ]?rads)\s*[:：]?\s*([0-6ⅰⅱⅲⅳⅴⅵⅠⅡⅢⅣⅤⅥIiVv]+)([a-c])?(\d*)\s*类?': 
             lambda m: (
-                f"Bi-Rads {convert_roman_to_arabic(m.group(2))}" +
+                f"BI-RADS {convert_roman_to_arabic(m.group(2))}" +
                 f"{m.group(3).upper() if m.group(3) else ''}" +
                 (f"。{m.group(4)}" if m.group(4) else "")
             ),
@@ -97,12 +97,12 @@ def preprocess_text_fields(data_dict):
     if "Breast_assessment" in data_dict:
         for side in ["Left_breast", "Right_breast"]:
             if side in data_dict["Breast_assessment"]:
-                if "Bi-Rads" in data_dict["Breast_assessment"][side]:
-                    data_dict["Breast_assessment"][side]["Bi-Rads"] = apply_all_replacements(
-                        data_dict["Breast_assessment"][side]["Bi-Rads"]
+                if "BI-RADS" in data_dict["Breast_assessment"][side]:
+                    data_dict["Breast_assessment"][side]["BI-RADS"] = apply_all_replacements(
+                        data_dict["Breast_assessment"][side]["BI-RADS"]
                     )
-                if data_dict["Breast_assessment"][side]["Bi-Rads"] in ['0','1','2','3','4a','4b','4c','4A','4B','4C','5','6']:
-                    data_dict["Breast_assessment"][side]["Bi-Rads"]='Bi-Rads '+data_dict["Breast_assessment"][side]["Bi-Rads"]
+                if data_dict["Breast_assessment"][side]["BI-RADS"] in ['0','1','2','3','4a','4b','4c','4A','4B','4C','5','6']:
+                    data_dict["Breast_assessment"][side]["BI-RADS"]='BI-RADS '+data_dict["Breast_assessment"][side]["BI-RADS"]
                 if "Density" in data_dict["Breast_assessment"][side]:
                     data_dict["Breast_assessment"][side]["Density"] = apply_all_replacements(
                         data_dict["Breast_assessment"][side]["Density"]
@@ -255,112 +255,112 @@ def process_samples(data):
         },
         "Suggestive_of": {
             "钙化": [
-            "Bi-Rads 2",
-            "Bi-Rads 6",
-            "Bi-Rads 4B",
-            "Bi-Rads 0",
-            "Bi-Rads 4C",
+            "BI-RADS 2",
+            "BI-RADS 6",
+            "BI-RADS 4B",
+            "BI-RADS 0",
+            "BI-RADS 4C",
             "乳腺癌",
-            "Bi-Rads 1",
-            "Bi-Rads 3",
-            "Bi-Rads 5",
-            "Bi-Rads 4A"
+            "BI-RADS 1",
+            "BI-RADS 3",
+            "BI-RADS 5",
+            "BI-RADS 4A"
             ],
             "肿块": [
-            "Bi-Rads 2",
-            "Bi-Rads 6",
-            "Bi-Rads 4B",
-            "Bi-Rads 0",
-            "Bi-Rads 4C",
+            "BI-RADS 2",
+            "BI-RADS 6",
+            "BI-RADS 4B",
+            "BI-RADS 0",
+            "BI-RADS 4C",
             "乳腺癌",
-            "Bi-Rads 1",
-            "Bi-Rads 3",
-            "Bi-Rads 5",
-            "Bi-Rads 4A"
+            "BI-RADS 1",
+            "BI-RADS 3",
+            "BI-RADS 5",
+            "BI-RADS 4A"
             ],
             "乳腺增生": [
-            "Bi-Rads 2",
-            "Bi-Rads 6",
-            "Bi-Rads 4B",
-            "Bi-Rads 0",
-            "Bi-Rads 4C",
+            "BI-RADS 2",
+            "BI-RADS 6",
+            "BI-RADS 4B",
+            "BI-RADS 0",
+            "BI-RADS 4C",
             "乳腺癌",
-            "Bi-Rads 1",
-            "Bi-Rads 3",
-            "Bi-Rads 5",
-            "Bi-Rads 4A"
+            "BI-RADS 1",
+            "BI-RADS 3",
+            "BI-RADS 5",
+            "BI-RADS 4A"
             ],
             "皮肤增厚": [
-            "Bi-Rads 2",
-            "Bi-Rads 6",
-            "Bi-Rads 4B",
-            "Bi-Rads 0",
-            "Bi-Rads 4C",
+            "BI-RADS 2",
+            "BI-RADS 6",
+            "BI-RADS 4B",
+            "BI-RADS 0",
+            "BI-RADS 4C",
             "乳腺癌",
-            "Bi-Rads 1",
-            "Bi-Rads 3",
-            "Bi-Rads 5",
-            "Bi-Rads 4A"
+            "BI-RADS 1",
+            "BI-RADS 3",
+            "BI-RADS 5",
+            "BI-RADS 4A"
             ],
             "淋巴结肿大": [
-            "Bi-Rads 2",
-            "Bi-Rads 6",
-            "Bi-Rads 4B",
-            "Bi-Rads 0",
-            "Bi-Rads 4C",
+            "BI-RADS 2",
+            "BI-RADS 6",
+            "BI-RADS 4B",
+            "BI-RADS 0",
+            "BI-RADS 4C",
             "乳腺癌",
-            "Bi-Rads 1",
-            "Bi-Rads 3",
-            "Bi-Rads 5",
-            "Bi-Rads 4A"
+            "BI-RADS 1",
+            "BI-RADS 3",
+            "BI-RADS 5",
+            "BI-RADS 4A"
             ],
             "乳头凹陷": [
-            "Bi-Rads 2",
-            "Bi-Rads 6",
-            "Bi-Rads 4B",
-            "Bi-Rads 0",
-            "Bi-Rads 4C",
+            "BI-RADS 2",
+            "BI-RADS 6",
+            "BI-RADS 4B",
+            "BI-RADS 0",
+            "BI-RADS 4C",
             "乳腺癌",
-            "Bi-Rads 1",
-            "Bi-Rads 3",
-            "Bi-Rads 5",
-            "Bi-Rads 4A"
+            "BI-RADS 1",
+            "BI-RADS 3",
+            "BI-RADS 5",
+            "BI-RADS 4A"
             ],
             "结构扭曲": [
-            "Bi-Rads 2",
-            "Bi-Rads 6",
-            "Bi-Rads 4B",
-            "Bi-Rads 0",
-            "Bi-Rads 4C",
+            "BI-RADS 2",
+            "BI-RADS 6",
+            "BI-RADS 4B",
+            "BI-RADS 0",
+            "BI-RADS 4C",
             "乳腺癌",
-            "Bi-Rads 1",
-            "Bi-Rads 3",
-            "Bi-Rads 5",
-            "Bi-Rads 4A"
+            "BI-RADS 1",
+            "BI-RADS 3",
+            "BI-RADS 5",
+            "BI-RADS 4A"
             ],
             "结节": [
-            "Bi-Rads 2",
-            "Bi-Rads 6",
-            "Bi-Rads 4B",
-            "Bi-Rads 0",
-            "Bi-Rads 4C",
+            "BI-RADS 2",
+            "BI-RADS 6",
+            "BI-RADS 4B",
+            "BI-RADS 0",
+            "BI-RADS 4C",
             "乳腺癌",
-            "Bi-Rads 1",
-            "Bi-Rads 3",
-            "Bi-Rads 5",
-            "Bi-Rads 4A"
+            "BI-RADS 1",
+            "BI-RADS 3",
+            "BI-RADS 5",
+            "BI-RADS 4A"
             ],
             "结构不对称": [
-            "Bi-Rads 2",
-            "Bi-Rads 6",
-            "Bi-Rads 4B",
-            "Bi-Rads 0",
-            "Bi-Rads 4C",
+            "BI-RADS 2",
+            "BI-RADS 6",
+            "BI-RADS 4B",
+            "BI-RADS 0",
+            "BI-RADS 4C",
             "乳腺癌",
-            "Bi-Rads 1",
-            "Bi-Rads 3",
-            "Bi-Rads 5",
-            "Bi-Rads 4A"
+            "BI-RADS 1",
+            "BI-RADS 3",
+            "BI-RADS 5",
+            "BI-RADS 4A"
             ]
         },
         'Modified_by':{
@@ -505,8 +505,8 @@ def process_samples(data):
         "密度": ["脂肪型", "纤维腺体型", "不均匀致密型", "致密型","BLA"],
         "观察": ["钙化", "肿块", "乳腺增生", "皮肤增厚", "淋巴结肿大", "乳头凹陷", 
                 "结构扭曲", "悬韧带增粗", "结节", "结构不对称"],
-        "诊断": ["Bi-Rads 0", "Bi-Rads 1", "Bi-Rads 2", "Bi-Rads 3",
-               "Bi-Rads 4A", "Bi-Rads 4B", "Bi-Rads 4C", "Bi-Rads 5", "Bi-Rads 6","乳腺癌", "BLA"],
+        "诊断": ["BI-RADS 0", "BI-RADS 1", "BI-RADS 2", "BI-RADS 3",
+               "BI-RADS 4A", "BI-RADS 4B", "BI-RADS 4C", "BI-RADS 5", "BI-RADS 6","乳腺癌", "BLA"],
     }
     
     exclude={}
@@ -516,6 +516,7 @@ def process_samples(data):
 
     valid_num=0
     case_data = preprocess_text_fields(data)
+    # print('2:',case_data.get("Relations"))
     text=case_data['Text']
 
     breast_assessment = case_data.get("Breast_assessment", {})
@@ -527,9 +528,9 @@ def process_samples(data):
         if density and density not in standard_entities["密度"]:
             breast_data["Density"]="BLA"
         
-        birads = breast_data.get("Bi-Rads")
+        birads = breast_data.get("BI-RADS")
         if birads and birads not in standard_entities["诊断"]:
-            breast_data["Bi-Rads"]="BLA"
+            breast_data["BI-RADS"]="BLA"
         
         entities = breast_data.get("Entities", {})
         for entity, status in list(entities.items()):
@@ -565,7 +566,7 @@ def process_samples(data):
         new_start1 = find_and_fix_entity_position(entity1)
         if new_start1==False:
             continue 
-
+        
         new_start2 = find_and_fix_entity_position(entity2)
         if new_start2==False:
             continue 
@@ -628,5 +629,6 @@ def process_samples(data):
         seen_relations.add(relation_key)
         valid_relations.append(relation_key)
     case_data['Relations']=valid_relations
+    case_data['Triples']=set(tuple(r) for r in valid_relations)
     return case_data
     
