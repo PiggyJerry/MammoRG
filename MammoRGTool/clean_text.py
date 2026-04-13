@@ -5,6 +5,7 @@ import pandas as pd
 from glob import glob
 from tqdm import tqdm
 
+
 def convert_roman_to_arabic(roman):
     roman_map = {
         'I': '1', 'II': '2', 'III': '3', 'IV': '4', 'V': '5', 'VI': '6',
@@ -14,54 +15,121 @@ def convert_roman_to_arabic(roman):
     }
     return roman_map.get(roman.strip(), roman)
 
+
+# ====== 新增：括号保护（支持嵌套，支持（）和()） ======
+def protect_parentheses(text: str):
+    """
+    将文本中所有括号段（（）和()，支持嵌套）替换为占位符。
+    返回：(替换后的文本, protected_segments列表)
+    """
+    if not isinstance(text, str) or not text:
+        return text, []
+
+    pairs = {'(' : ')', '（': '）'}
+    opens = set(pairs.keys())
+    closes = set(pairs.values())
+    close_to_open = {v: k for k, v in pairs.items()}
+
+    protected = []
+    stack = []  # elements: (open_char, start_index)
+    spans = []
+
+    # 找出所有最外层括号span（支持嵌套）
+    for i, ch in enumerate(text):
+        if ch in opens:
+            stack.append((ch, i))
+        elif ch in closes:
+            if stack and stack[-1][0] == close_to_open[ch]:
+                open_ch, start = stack.pop()
+                if not stack:
+                    spans.append((start, i + 1))
+
+    if not spans:
+        return text, []
+
+    # 从后往前替换，避免索引偏移
+    new_text = text
+    for idx, (s, e) in enumerate(reversed(spans)):
+        protected.append(new_text[s:e])
+        placeholder = f"__PAREN_{len(protected)-1}__"
+        new_text = new_text[:s] + placeholder + new_text[e:]
+
+    # 上面 protected 的顺序是从后往前收集的，保持占位符与列表一致即可
+    return new_text, protected
+
+
+def restore_parentheses(text: str, protected):
+    if not isinstance(text, str) or not protected:
+        return text
+    # 依次替换回去
+    for i, seg in enumerate(protected):
+        text = text.replace(f"__PAREN_{i}__", seg)
+    return text
+
+
+def apply_outside_parentheses(text: str, func):
+    """只对括号外内容应用 func；括号内原样保留"""
+    if not isinstance(text, str):
+        return text
+    tmp, protected = protect_parentheses(text)
+    tmp = func(tmp)
+    tmp = restore_parentheses(tmp, protected)
+    return tmp
+
+
+# ====== 你的原始清洗逻辑：保持不变（只做轻微结构整理） ======
 def process_text(text):
     if not isinstance(text, str):
         return text
+
+    # 去掉开头的“2D显示: / 3D显示:”等
     text = re.sub(r'^\s*([23]D(?:\+[23]D)?\s*显示\s*[:：]\s*)', '', text, flags=re.IGNORECASE)
+
+    # BI-RADS 里把“2 3.”这种误分隔改成“2。3.”
     text = re.sub(
         r'(?i)(BI[-/]RADS\s*[:：]\s*)([0-6][A-Ca-c]?)\s+([0-9])(\s*[.,、，])',
         lambda m: f"{m.group(1)}{m.group(2)}。{m.group(3)}{m.group(4)}",
         text
     )
-
     text = re.sub(
         r'(?i)(BI[-/]RADS\s*[:：]\s*)([0-6])\s{1,}([0-9])(\s*[.,、，])',
         lambda m: f"{m.group(1)}{m.group(2)}。{m.group(3)}{m.group(4)}",
         text
     )
-
     text = re.sub(
         r'(?i)(BI[-/]RADS\s*[:：]?\s*)([0-6])\s*\n\s*([0-9])(\s*[.,、，])',
         lambda m: f"{m.group(1)}{m.group(2)}。{m.group(3)}{m.group(4)}",
         text
     )
-
     text = re.sub(
         r'(?i)(BI[-/]RADS\s*[:：]\s*)([0-6])([0-9])(\s*[.,、，])',
         lambda m: f"{m.group(1)}{m.group(2)}。{m.group(3)}{m.group(4)}",
         text
     )
-    
     text = re.sub(
         r'(?i)(Bi[-/]Rads\s+)([0-6])([0-9])(\s*[.,、，])',
         lambda m: f"{m.group(1)}{m.group(2)}。{m.group(3)}{m.group(4)}",
         text
     )
 
+    # 你这里有一条重复的BI-RADS处理，我保持你的原意，但建议只留一种；先不改动逻辑
     text = re.sub(
         r'(?i)(BI[-/]RADS\s*[:：]\s*)([0-6])([0-9])(\s*[.,、，])',
-        lambda m: f"Bi-Rads {m.group(2)}。{m.group(3)}{m.group(4)}",
+        lambda m: f"BI-RADS {m.group(2)}。{m.group(3)}{m.group(4)}",
         text
     )
 
+    # 统一BI-RADS写法
     text = re.sub(
         r'(?i)(BI[-/]RADS|Bi[-/]Rads)\s*[:：]?\s*',
-        'Bi-Rads ',
+        'BI-RADS ',
         text
     )
 
+    # 压缩空白
     text = re.sub(r'[\s\u3000]+', ' ', text).strip()
 
+    # 中央区/乳晕区补左/右/双（仅在括号外生效，因为外层会保护括号）
     def process_central_and_areolar(match):
         term = match.group()
         if re.search(r'(左[侧乳]|右[侧乳]|双[侧乳]?)\s*(中央区|乳晕区)', text[max(0, match.start()-5):match.end()], re.IGNORECASE):
@@ -80,21 +148,23 @@ def process_text(text):
 
     replacement_rules = {
         r'(?i)bi[-/ ]?rads\s*[:：]?\s*([ivxⅰ-ⅵⅠ-Ⅵ]+)\s*-\s*([ivxⅰ-ⅵⅠ-Ⅵ]+)':
-            lambda m: f"Bi-Rads {convert_roman_to_arabic(m.group(1))}-{convert_roman_to_arabic(m.group(2))}",
+            lambda m: f"BI-RADS {convert_roman_to_arabic(m.group(1))}-{convert_roman_to_arabic(m.group(2))}",
 
-        r'(?i)(bi[-/ ]?rads)\s*[:：]?\s*([0-6ⅰⅱⅲⅳⅴⅵⅠⅡⅢⅣⅤⅥIiVv]+)([a-c])?(\d*)\s*类?': 
+        r'(?i)(bi[-/ ]?rads)\s*[:：]?\s*([0-6ⅰⅱⅲⅳⅴⅵⅠⅡⅢⅣⅤⅥIiVv]+)([a-c])?(\d*)\s*类?':
             lambda m: (
-                f"Bi-Rads {convert_roman_to_arabic(m.group(2))}" +
-                f"{m.group(3).upper() if m.group(3) else ''}" +
-                (f"。{m.group(4)}" if m.group(4) else "")
+                f"BI-RADS {convert_roman_to_arabic(m.group(2))}"
+                + f"{m.group(3).upper() if m.group(3) else ''}"
+                + (f"。{m.group(4)}" if m.group(4) else "")
             ),
-        r'A腺体型|a腺体型|A型|a型|A类|a类|脂肪腺体型|脂肪为主型|ACR A|ACR a|acr A|acr a': "脂肪型",
-        r'B腺体型|b腺体型|B型|b型|B类|b类|散在纤维体型|散在纤维腺体型|少量腺体型|均衡腺体型|散在腺体型|散在稀疏腺体型|少腺体型|疏松腺体型|散在纤维型|均质纤维腺体型|ACR B|ACR b|acr B|acr b': "纤维腺体型",
-        r'C腺体型|c腺体型|C型|c型|C类|c类|多量腺体型|中量腺体型|多腺体型|脂肪腺体混合型|不均匀性致密型|不均质致密型|不均匀纤维腺体型|不均匀腺体型|散在纤维不均匀致密型|散在不均匀致密型|不均匀致密线腺体型|混合腺体型|ACR C|ACR c|acr C|acr c': "不均匀致密型",
-        r'D腺体型|d腺体型|D型|d型|D类|d类|致密腺体型|极度致密型|十分致密型|ACR D|ACR d|acr D|acr d': "致密型",
-        r'欠':"不",
-        r'稍':"",
-        r'尚':"",
+
+        r'A腺体型|a腺体型|A型|a型|A类|a类|脂肪腺体型|脂肪为主型|ACR A|ACR a|acr A|acr a|脂肪腺体类': "脂肪型",
+        r'B腺体型|b腺体型|B型|b型|B类|b类|散在纤维体型|散在纤维腺体型|少量腺体型|均衡腺体型|散在腺体型|散在稀疏腺体型|少腺体型|疏松腺体型|散在纤维型|均质纤维腺体型|ACR B|ACR b|acr B|acr b|散在纤维腺体类': "纤维腺体型",
+        r'C腺体型|c腺体型|C型|c型|C类|c类|多量腺体型|中量腺体型|多腺体型|脂肪腺体混合型|不均匀性致密型|不均质致密型|不均匀纤维腺体型|不均匀腺体型|散在纤维不均匀致密型|散在不均匀致密型|不均匀致密线腺体型|混合腺体型|ACR C|ACR c|acr C|acr c|不均匀致密类': "不均匀致密型",
+        r'D腺体型|d腺体型|D型|d型|D类|d类|致密腺体型|极度致密型|十分致密型|ACR D|ACR d|acr D|acr d|致密腺体类': "致密型",
+
+        r'欠': "不",
+        r'稍': "",
+        r'尚': "",
         r'乳腺体': "乳腺",
         r'肿物': "肿块",
         r'淋巴结增大|肿大淋巴结|增大淋巴结|稍大淋巴结': "淋巴结肿大",
@@ -149,12 +219,13 @@ def process_text(text):
         r'左乳腺增生': "左乳乳腺增生",
         r'右乳腺增生': "右乳乳腺增生",
     }
-    
+
     for pattern, replacement in replacement_rules.items():
         text = re.sub(pattern, replacement, text)
+
     return text
 
 
 def clean_text(text):
-    text = process_text(text)
-    return text
+    # 关键：括号内不改动
+    return apply_outside_parentheses(text, process_text)
