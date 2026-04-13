@@ -9,10 +9,7 @@ import numpy as np
 from tqdm import tqdm
 from sacrebleu.metrics import BLEU
 
-# import rrg_eval.chexbert
 import rrg_eval.rouge
-# import rrg_eval.f1radgraph
-# from rrg_eval.f1radgraph import F1RadGraphv2
 from rrg_eval.factuality_utils import CONDITIONS
 import sys
 sys.path.append("/home/user/MammoRG")
@@ -62,8 +59,6 @@ def bertscore(predictions, references):
 
 def mammorgscore(predictions, references, tool, bootstrap_ci: bool = False):
     return tool.get_output(preds=predictions, refs=references,calculate_ci=bootstrap_ci)
-# def chexbert(predictions, references, bootstrap_ci: bool = False):
-#     return rrg_eval.chexbert.evaluate(predictions, references, include_original=False, bootstrap_ci=bootstrap_ci)
 
 
 SCORER_NAME_TO_CLASS = {
@@ -73,9 +68,6 @@ SCORER_NAME_TO_CLASS = {
     "BLEU-1": bleu1,
     "BERTScore": bertscore,
     'MammoRGScore': mammorgscore
-    
-    # "F1-RadGraph": radgraph,
-    # "CheXbert": chexbert,
 }
 
 
@@ -165,8 +157,6 @@ def main(
 
     if scorers is None:
         scorers = [
-            # 'CheXbert',
-            # 'F1-RadGraph',
             'BLEU-1',
             'BLEU-4',
             'ROUGE-L',
@@ -184,21 +174,13 @@ def main(
         main_results = pd.DataFrame.from_dict({
             k:v for k,v in results.items() if k not in ("breakdown+", "breakdown-", "chexbert_metrics")   
         })
-        # print(main_results[[
-        #     "Micro-F1-14", "Micro-F1-5", "Macro-F1-14", "Macro-F1-5",
-        #     "Micro-F1-14+", "Micro-F1-5+", "Macro-F1-14+", "Macro-F1-5+",
-        #     "F1-RadGraph", "BLEU-1", "BLEU-4", "ROUGE-L"
-        # ]])
+     
         print(main_results[[
             "BLEU-1", "BLEU-4", "ROUGE-L", 'composition_f1', 'birads_f1', 'finding_f1', 'relation_f1'
         ]])
     else:
         main_results = pd.DataFrame.from_dict({k:v for k,v in results.items() if type(v)!= dict}, 'index')
-        # print(main_results.T[[
-        #     "Micro-F1-14", "Micro-F1-5", "Macro-F1-14", "Macro-F1-5",
-        #     "Micro-F1-14+", "Micro-F1-5+", "Macro-F1-14+", "Macro-F1-5+",
-        #     "F1-RadGraph", "BLEU-1", "BLEU-4", "ROUGE-L"
-        # ]])
+       
         print(main_results.T[[
             "BLEU-1", "BLEU-4", "ROUGE-L", 'composition_f1', 'birads_f1', 'finding_f1', 'relation_f1'
         ]])
@@ -217,30 +199,6 @@ def main(
 
         wandb.init(name=run_name)
         wandb.log(wandb_results)
-    
-    # print("========== CheXbert F1 (uncertain as positive) ==========")
-    # breakdown_p = pd.DataFrame(results["breakdown+"])[sorted(CONDITIONS) + ["micro avg", "macro avg"]].T[
-    #     ['f1-score','precision','recall','support']
-    # ]
-    # print(breakdown_p)
-    # print("")
-    # breakdown_p.to_csv(os.path.join(output_dir, "breakdown_p.csv"))
-    
-    # print("========== CheXbert F1 (uncertain as negative) ==========")
-    # breakdown_n = pd.DataFrame(results["breakdown-"])[sorted(CONDITIONS) + ["micro avg", "macro avg"]].T[
-    #     ['f1-score','precision','recall','support']
-    # ]
-    # print(breakdown_n)
-    # print("")
-    # breakdown_n.to_csv(os.path.join(output_dir, "breakdown_n.csv"))
-
-    # if report_chexbert_f1:
-    #     print("========== CheXbert F1 ==========")
-    #     chexbert_df = pd.DataFrame(results["chexbert_metrics"])[sorted(CONDITIONS) + ["avg"]].T[
-    #         ["positive f1", "negation f1", "uncertain f1", "blank f1", "weighted f1", "kappas"]
-    #     ]
-    #     print(chexbert_df)
-    #     print("")
     
 
 if __name__ == "__main__":
