@@ -152,75 +152,7 @@ def eval_model(
             images_dict = {k: v.cuda() for k, v in images_dict.items()}
         else:
             images_dict = None
-        # class NaNInspector:
-        #     def __init__(self, model):
-        #         self.model = model
-        #         self.nan_modules = {}  # 存储 {模块路径: (输入形状, 输出形状)}
-            
-        #     def hook_fn(self, module, input, output):
-        #         # 检查输出是否含NaN/Inf
-        #         if isinstance(output, torch.Tensor):
-        #             if torch.isnan(output).any() or torch.isinf(output).any():
-        #                 # 获取模块的完整路径名称（如 'model.layers.0.self_attn.q_proj'）
-        #                 module_path = self._get_module_path(module)
-                        
-        #                 # 记录输入/输出形状
-        #                 input_shapes = [x.shape for x in input if isinstance(x, torch.Tensor)]
-        #                 self.nan_modules[module_path] = {
-        #                     'input_shapes': input_shapes,
-        #                     'output_shape': output.shape,
-        #                     'output_stats': f"min={output.min().item():.2f}, max={output.max().item():.2f}"
-        #                 }
-                        
-        #                 # 打印关键信息
-        #                 print(f"\n⚠️ [NaN/Inf detected]")
-        #                 print(f"Module: {module_path}")
-        #                 print(f"Input shapes: {input_shapes}")
-        #                 print(f"Output shape: {output.shape}")
-        #                 print(f"Output range: {output.min().item():.4f} ~ {output.max().item():.4f}")
-        #         return output
-            
-        #     def _get_module_path(self, module):
-        #         """递归查找模块的完整路径名称"""
-        #         for name, m in self.model.named_modules():
-        #             if m is module:
-        #                 return name
-        #         return "unknown_module"
-            
-        #     def attach_hooks(self):
-        #         """为所有子模块注册钩子"""
-        #         hooks = []
-        #         for _, module in self.model.named_modules():
-        #             hook = module.register_forward_hook(self.hook_fn)
-        #             hooks.append(hook)
-        #         return hooks
-            
-        #     def inspect(self):
-        #         """打印所有检测到的问题模块"""
-        #         if not self.nan_modules:
-        #             print("✅ 未检测到NaN/Inf")
-        #         else:
-        #             print("\n🔴 发现问题的模块列表:")
-        #             for path, info in self.nan_modules.items():
-        #                 print(f"- {path}:")
-        #                 print(f"  Inputs: {info['input_shapes']}")
-        #                 print(f"  Output: {info['output_shape']} ({info['output_stats']})")
-            
-        # inspector = NaNInspector(model)
 
-        # # 注册钩子并运行生成
-        # hooks = inspector.attach_hooks()
-        # def debug_forward(name):  # 接收模块名称
-        #     def hook(module, input, output):
-        #         if isinstance(output, torch.Tensor):
-        #             print(f"{name} ({module.__class__.__name__}) output: {output.min().item():.4f} ~ {output.max().item():.4f}")
-        #     return hook
-
-        # hooks = []
-        # for name, module in model.named_modules():
-        #     if isinstance(module, (torch.nn.Linear, torch.nn.LayerNorm)):
-        #         hook = module.register_forward_hook(debug_forward(name))  # 传递名称
-        #         hooks.append(hook)
         stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
         with torch.inference_mode():
             batch_output_ids = model.generate(
@@ -232,45 +164,10 @@ def eval_model(
                 num_beams=num_beams,
                 max_new_tokens=1024,
                 use_cache=True).cpu()
-            # batch_output = model.generate(
-            #     torch.stack(batch_input_ids).cuda(),
-            #     images=images_dict,
-            #     do_sample=True if temperature > 0 else False,
-            #     temperature=temperature,
-            #     top_p=top_p,
-            #     num_beams=num_beams,
-            #     max_new_tokens=1024,
-            #     use_cache=True,
-            #     output_scores=True,  # 关键参数
-            #     return_dict_in_generate=True  # 需要返回结构化结果
-            # )
-            
-            # inspector.inspect()
 
-            # # 获取输出token ids
-            # batch_output_ids = batch_output.sequences.cpu()
-
-            # # 获取所有生成步的logits（Tuple[Tensor]）
-            # all_logits = batch_output.scores  # 每个元素是(vocab_size,)的tensor
-
-            # # 示例：查看第一步的top-5预测
-            # first_step_logits = all_logits[0]
-            # top5_probs, top5_ids = torch.softmax(first_step_logits, dim=-1).topk(5)
-            # # print("第一步top-5预测:", [(tokenizer.decode([idx]), prob.item()) for idx, prob in zip(top5_ids, top5_probs)])
-            # # print("第一步top-5预测:", [(tokenizer.decode(idx), prob.item()) for idx, prob in zip(top5_ids, top5_probs)])
-            # print("top5_ids shape:", top5_ids.shape)  # 例如 torch.Size([5])
-
-            # # 如果是1D张量（如 [5]），可以直接用方法1
-            # # 如果是2D张量（如 [batch_size, 5]），需要指定索引：
-            # batch_idx = 0  # 假设解码第一个样本
-            # print("第一步top-5预测:", [
-            #     (tokenizer.decode(top5_ids[batch_idx, i].item()), top5_probs[batch_idx, i].item())
-            #     for i in range(5)
-            # ])
             batch_outputs = tokenizer.batch_decode(
                 batch_output_ids[:, len(batch_input_ids[0]):], skip_special_tokens=True
             )
-            # exit()
 
         for query, prompt, outputs, input_ids, output_ids in zip(
             batch_queries, batch_prompts, batch_outputs, batch_input_ids, batch_output_ids):
