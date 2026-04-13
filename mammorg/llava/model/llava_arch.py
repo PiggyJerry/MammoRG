@@ -175,14 +175,14 @@ class LlavaMetaForCausalLM(ABC):
           
                 
             cur_new_input_embeds.append(self.get_model().embed_tokens(cur_input_ids[:image_token_indices[0]]))
-            cur_new_input_embeds.append(view_image_features['R_CC'])
             cur_new_input_embeds.append(view_graph_features['R_CC'])
-            cur_new_input_embeds.append(view_image_features['R_MLO'])
+            cur_new_input_embeds.append(view_image_features['R_CC'])
             cur_new_input_embeds.append(view_graph_features['R_MLO'])
-            cur_new_input_embeds.append(view_image_features['L_CC'])
+            cur_new_input_embeds.append(view_image_features['R_MLO'])
             cur_new_input_embeds.append(view_graph_features['L_CC'])
-            cur_new_input_embeds.append(view_image_features['L_MLO'])
+            cur_new_input_embeds.append(view_image_features['L_CC'])
             cur_new_input_embeds.append(view_graph_features['L_MLO'])
+            cur_new_input_embeds.append(view_image_features['L_MLO'])
             cur_new_input_embeds.append(report_features[batch_idx])
             if labels is not None:
                 cur_new_labels.append(cur_labels[:image_token_indices[0]])
