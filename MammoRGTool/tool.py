@@ -1,5 +1,4 @@
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 import pandas as pd
 import re
 import torch.optim as optim
@@ -31,9 +30,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 DENSITY_CLASSES = ["脂肪型", "纤维腺体型", "不均匀致密型", "致密型", "BLA"]
 BI_RADS_CLASSES = [
-    "Bi-Rads 0", "Bi-Rads 1", "Bi-Rads 2", "Bi-Rads 3",
-    "Bi-Rads 4A", "Bi-Rads 4B", "Bi-Rads 4C",
-    "Bi-Rads 5", "Bi-Rads 6", "BLA"
+    "BI-RADS 0", "BI-RADS 1", "BI-RADS 2", "BI-RADS 3",
+    "BI-RADS 4A", "BI-RADS 4B", "BI-RADS 4C",
+    "BI-RADS 5","BI-RADS 6", "BLA"
 ]
 ENTITY_CLASSES = ["POS", "NEG", "UNC", "BLA"]
 ENTITY_NAMES = [
@@ -58,7 +57,6 @@ birads_priority = {
     'ⅰ': 1, 'ⅱ': 2, 'ⅲ': 3, 'ⅳ': 4, 'ⅴ': 5, 'ⅵ': 6
 }
 
-
 def rule_based_get_birads(conclusion, laterality):
     if pd.isna(conclusion) or conclusion is None:
         return None
@@ -68,16 +66,22 @@ def rule_based_get_birads(conclusion, laterality):
     m = re.search(r'Impression\s*[:：]', conclusion, flags=re.IGNORECASE)
     text = conclusion[m.end():] if m else conclusion
 
-    # 2) 更宽松的 BI-RADS 识别：BI-RADS分类：3 / BI RADS 3 / BI/RADS 3 / Bi-Rads 4A / BIRADS 2 / 分类：2
+    # 2) 更宽松的 BI-RADS 识别：BI-RADS分类：3 / BI RADS 3 / BI/RADS 3 / BI-RADS 4A / BIRADS 2 / 分类：2
+    # birads_pattern = re.compile(
+    #     r'(?:'
+    #     r'BI\s*[-/\s]?\s*RADS'      # BI-RADS / BI RADS / BI/RADS
+    #     r'|BIRADS'                  # BIRADS
+    #     r'|Bi\s*[-/\s]?\s*Rads'     # BI-RADS / Bi Rads
+    #     r'|分类'
+    #     r')'
+    #     r'(?:\s*分类)?\s*[:：]?\s*'
+    #     r'([IVXivxⅠⅡⅢⅣⅤⅥⅰⅱⅲⅳⅴⅵ]+|\d+(?:[a-cA-C])?)',
+    #     re.IGNORECASE
+    # )
     birads_pattern = re.compile(
-        r'(?:'
-        r'BI\s*[-/\s]?\s*RADS'      # BI-RADS / BI RADS / BI/RADS
-        r'|BIRADS'                  # BIRADS
-        r'|Bi\s*[-/\s]?\s*Rads'     # Bi-Rads / Bi Rads
-        r'|分类'
-        r')'
+        r'(?:BI\s*[-/\s]?\s*RADS|BIRADS|Bi\s*[-/\s]?\s*Rads|分类)'
         r'(?:\s*分类)?\s*[:：]?\s*'
-        r'([IVXivxⅠⅡⅢⅣⅤⅥⅰⅱⅲⅳⅴⅵ]+|\d+(?:[a-cA-C])?)',
+        r'(0|[1-6](?:[A-Ca-c])?|[IVXivxⅠⅡⅢⅣⅤⅥⅰⅱⅲⅳⅴⅵ]+)',
         re.IGNORECASE
     )
 
@@ -129,11 +133,15 @@ def rule_based_get_birads(conclusion, laterality):
 
     # 6) laterality 过滤（优先单侧，其次 double）
     if laterality == 'L':
-        valid = [x for x in birads_with_sides if x['side_type'] == 'left'] \
-                or [x for x in birads_with_sides if x['side_type'] == 'double']
+        valid = (
+            [x for x in birads_with_sides if x['side_type'] == 'left'] +
+            [x for x in birads_with_sides if x['side_type'] == 'double']
+        )
     elif laterality == 'R':
-        valid = [x for x in birads_with_sides if x['side_type'] == 'right'] \
-                or [x for x in birads_with_sides if x['side_type'] == 'double']
+        valid = (
+            [x for x in birads_with_sides if x['side_type'] == 'right'] +
+            [x for x in birads_with_sides if x['side_type'] == 'double']
+        )
     else:
         return None
 
@@ -150,8 +158,21 @@ def rule_based_get_birads(conclusion, laterality):
     else:
         num_out = num
 
-    return f"Bi-Rads {num_out}"
+    return f"BI-RADS {num_out}"
 
+def merge_birads_sentences(sentences):
+    merged = []
+
+    for s in sentences:
+        if re.search(r"BI-?RADS", s, re.IGNORECASE):
+            if len(merged) > 0:
+                merged[-1] += "。" + s
+            else:
+                merged.append(s)
+        else:
+            merged.append(s)
+
+    return merged
 
 def rule_based_get_density(conclusion, laterality):
     if pd.isna(conclusion):
@@ -281,7 +302,7 @@ def vector_to_dict(
 
         return {
             "Density": density,
-            "Bi-Rads": bi_rads,
+            "BI-RADS": bi_rads,
             "Entities": entities
         }
 
@@ -305,7 +326,7 @@ def vector_to_dict(
         left_breast['Density'] = rule_based_density
     rule_based_birads = rule_based_get_birads(text, 'L')
     if rule_based_birads and rule_based_birads != 'BLA':
-        left_breast['Bi-Rads'] = rule_based_birads
+        left_breast['BI-RADS'] = rule_based_birads
     
     right_breast=_decode_breast(right_density_idx, right_birads_idx, right_state_indices)    
     rule_based_density = rule_based_get_density(text, 'R')
@@ -313,7 +334,7 @@ def vector_to_dict(
         right_breast['Density'] = rule_based_density
     rule_based_birads = rule_based_get_birads(text, 'R')
     if rule_based_birads and rule_based_birads != 'BLA':
-        right_breast['Bi-Rads'] = rule_based_birads
+        right_breast['BI-RADS'] = rule_based_birads
             
 
     if '右乳头未见凹陷' in text:
@@ -554,7 +575,6 @@ class MammoRGTool(object):
                 relation = item["relation"]
                 obj = item["object"]
                 relations.append([subject, relation, obj]) 
-            
             breast_assessment=vector_to_dict(
                     origin_text,
                     vector=entity_statement,
@@ -670,14 +690,18 @@ class MammoRGTool(object):
                     
                     new_relations = []
                     suggestive_relations_to_keep = set()
-                    
+                    sentences = re.split('[。；]', impression_part)
+                    sentences = [s.strip() for s in sentences if s.strip()]
+                    sentences = merge_birads_sentences(sentences)
+                    sentences = [sentence.upper().replace(" ", "") for sentence in sentences]
                     for rel in relations:
                         if rel[1] == "Suggestive_of":
                             entity = rel[0]
                             birads = rel[2]
                             
                             is_correct = False
-                            sentences = re.split('[。；]', impression_part)
+                            
+                            birads = birads.upper().replace(" ", "")
                             
                             for sentence in sentences:
                                 if entity in sentence and birads in sentence:
@@ -697,12 +721,10 @@ class MammoRGTool(object):
                     relations.clear()
                     relations.extend(new_relations)
                     
-                    sentences = re.split('[。；]', impression_part)
-                    
                     birads_patterns = [
-                        r'Bi-Rads\s*[0-6][A-Ca-c]?',
                         r'BI-RADS\s*[0-6][A-Ca-c]?',
-                        r'bi-rads\s*[0-6][A-Ca-c]?',
+                        r'BI-RADS\s*[0-6][A-Ca-c]?',
+                        r'BI-RADS\s*[0-6][A-Ca-c]?',
                         r'BiRads\s*[0-6][A-Ca-c]?',
                         r'BIRADS\s*[0-6][A-Ca-c]?',
                         r'birads\s*[0-6][A-Ca-c]?'
@@ -716,13 +738,13 @@ class MammoRGTool(object):
                         
                         if not birads_matches:
                             loose_matches = re.findall(r'(?i)(?:bi[-\s]?rads)\s*([0-6][a-c]?)', sentence)
-                            birads_matches = [f"Bi-Rads {match}" for match in loose_matches]
+                            birads_matches = [f"BI-RADS {match}" for match in loose_matches]
                         
                         for birads_match in birads_matches:
                             birads_clean = re.sub(r'\s+', ' ', birads_match).strip()
-                            birads_clean = re.sub(r'(?i)bi[-\s]?rads', 'Bi-Rads', birads_clean, count=1)
+                            birads_clean = re.sub(r'(?i)bi[-\s]?rads', 'BI-RADS', birads_clean, count=1)
                             
-                            birads_clean = birads_clean.upper()
+                            birads_clean = birads_clean.upper().replace(" ", "")
                             
                             birads_index = sentence.find(birads_match)
                             if birads_index == -1:
@@ -735,7 +757,6 @@ class MammoRGTool(object):
                                     if entity in text_before_birads:
                                         left_pos = breast_assessment['Left_breast']['Entities'].get(entity) == 'POS'
                                         right_pos = breast_assessment['Right_breast']['Entities'].get(entity) == 'POS'
-                                        
                         
                                         
                                         if (left_pos or right_pos) and '未见' not in text_before_birads:
@@ -752,7 +773,9 @@ class MammoRGTool(object):
                                                 suggestive_relations_to_keep.add((entity, birads_clean))
 
             process_suggestive_of_relations()
-            
+            relations = list(set(tuple(r) for r in relations))
+            relations = [list(r) for r in relations]
+            triples_dict = set(tuple(r) for r in relations)
             return process_samples({
                 'Text': origin_text,
                 'Relations': relations,
@@ -830,8 +853,9 @@ class MammoRGTool(object):
                     sample_true_density.append(true_label)
                     sample_pred_density.append(pred_label)
 
-            true_b_left = ref_output['Breast_assessment']['Left_breast']['Bi-Rads']
-            pred_b_left = pred_output['Breast_assessment']['Left_breast']['Bi-Rads']
+            true_b_left = ref_output['Breast_assessment']['Left_breast']['BI-RADS']
+            pred_b_left = pred_output['Breast_assessment']['Left_breast']['BI-RADS']
+
             if true_b_left != 'BLA':
                 total_should_evaluate['birads'] += 1
                 sample_should_evaluate['birads'] += 1
@@ -845,8 +869,9 @@ class MammoRGTool(object):
                     sample_true_birads.append(true_label)
                     sample_pred_birads.append(pred_label)
             
-            true_b_right = ref_output['Breast_assessment']['Right_breast']['Bi-Rads']
-            pred_b_right = pred_output['Breast_assessment']['Right_breast']['Bi-Rads']
+            true_b_right = ref_output['Breast_assessment']['Right_breast']['BI-RADS']
+            pred_b_right = pred_output['Breast_assessment']['Right_breast']['BI-RADS']
+ 
             if true_b_right != 'BLA':
                 total_should_evaluate['birads'] += 1
                 sample_should_evaluate['birads'] += 1
@@ -864,7 +889,6 @@ class MammoRGTool(object):
             pred_left = pred_output['Breast_assessment']['Left_breast']['Entities']
             true_right = ref_output['Breast_assessment']['Right_breast']['Entities']
             pred_right = pred_output['Breast_assessment']['Right_breast']['Entities']
-            
             for entity in ENTITY_NAMES:
                 true_state = true_left.get(entity, "BLA")
                 pred_state = pred_left.get(entity, "BLA")
@@ -915,19 +939,21 @@ class MammoRGTool(object):
             
             density_f1 = None
             if len(sample_true_density) > 0:
-                raw_f1 = f1_score(sample_true_density, sample_pred_density, average='macro')
-                sample_should = sample_should_evaluate['density']
-                sample_actual = len(sample_true_density)
-                completeness = sample_actual / sample_should if sample_should > 0 else 0
-                density_f1 = raw_f1 * completeness
+                correct = sum(
+                    1 for t,p in zip(sample_true_density, sample_pred_density)
+                    if t == p
+                )
+
+                density_f1 = correct / len(sample_true_density)
 
             birads_f1 = None
             if len(sample_true_birads) > 0:
-                raw_f1 = f1_score(sample_true_birads, sample_pred_birads, average='macro')
-                sample_should = sample_should_evaluate['birads']
-                sample_actual = len(sample_true_birads)
-                completeness = sample_actual / sample_should if sample_should > 0 else 0
-                birads_f1 = raw_f1 * completeness
+                correct = sum(
+                    1 for t,p in zip(sample_true_birads, sample_pred_birads)
+                    if t == p
+                )
+
+                birads_f1 = correct / len(sample_true_birads)
 
             entities_f1 = None
             if len(sample_pos_true) > 0:
@@ -940,9 +966,9 @@ class MammoRGTool(object):
             
             per_sample_f1.append({
                 'relation_f1': relations_f1,
-                'composition_f1': density_f1,
+                'density_f1': density_f1,
                 'birads_f1': birads_f1,
-                'finding_f1': entities_f1
+                'entities_f1': entities_f1
             })
             
             sample_data = {
@@ -959,9 +985,12 @@ class MammoRGTool(object):
             sample_data_list.append(sample_data)
             
             outputs.append({
+                'Ref_text': ref_output['Text'],
                 'Pred_text': pred_output['Text'],
                 'Ref_breast_assessment': ref_output['Breast_assessment'],
                 'Pred_breast_assessment': pred_output['Breast_assessment'],
+                'Ref_relations': ref_output['Relations'],
+                'Pred_relations': pred_output['Relations'],
             })
 
         metrics = {}
@@ -1093,16 +1122,16 @@ class MammoRGTool(object):
             relations_metrics = {'f1': f1}
 
         status_metrics = {
-            'composition_f1': metrics.get('density', None),
+            'density_f1': metrics.get('density', None),
             'birads_f1': metrics.get('bi_rads', None),
-            'finding_f1': metrics.get('entities', None),
+            'entities_f1': metrics.get('entities', None),
         }
 
         if calculate_ci:
             status_metrics.update({
-                'composition_f1_ci': metrics.get('density_ci', (None, None)),
+                'density_f1_ci': metrics.get('density_ci', (None, None)),
                 'birads_f1_ci': metrics.get('bi_rads_ci', (None, None)),
-                'finding_f1_ci': metrics.get('entities_ci', (None, None)),
+                'entities_f1_ci': metrics.get('entities_ci', (None, None)),
             })
         
         if self.output_dir:
@@ -1121,13 +1150,18 @@ class MammoRGTool(object):
         return results
 
 if __name__ == "__main__":
-    ref=["Findings:双乳基本对称，呈不均匀致密型，见斑片状、结节状密影及脂肪组织填充。双乳见数个结节状高密度影，部分边缘模糊，其中左乳外上象限结节，大小约5mm×7mm，形态不规整，周围腺体纠集。余直径约3-8mm。双乳未见钙化影。双乳腺体组织排列紊乱。双乳悬韧带增粗，未见明确血管增多及导管增粗。双乳皮肤、乳晕及乳头未见明显异常。双侧腋下多发大淋巴结影，较大者短径约9mm。; Impression: 1.双乳呈不均匀致密型；左乳外上象限结节，符合Bi-Rads 4A，建议MRI检查。 2.余双乳多发小结节灶，符合Bi-Rads 3，建议随访复查。 3.双侧腋下多发大淋巴结。"]
-    pred=["Findings:双乳基本对称，呈不均匀致密型，见斑片状、结节状密影及脂肪组织填充，双乳见多发小结节状高密度影，大小约3-6mm，双乳未见明确钙化灶。双乳悬韧带增粗，未见明确血管增多及导管增粗。双乳皮肤、乳晕及乳头未见明显异常。双侧腋下未见淋巴结肿大影。; Impression: 双乳呈不均匀致密型，双乳多发小结节，符合Bi-Rads 3，建议随访复查。"]
+    # pred=["Findings: 双乳基本对称，呈不均匀致密型，见斑片状、结节状密影及脂肪组织填充，双乳未见明确肿块影及钙化灶。双乳悬韧带增粗，未见明确血管增多及导管增粗。双乳皮肤、乳晕及乳头未见明显异常。左乳乳内见一淋巴结影，大小约9mm*6mm。; Impression: 1.双乳呈不均匀致密型。 2.右乳符合BI-RADS 0，建议乳腺MRI检查。 3.左乳符合BI-RADS 2，左乳乳内一淋巴结。"]
+    # ref=["Findings: 双乳呈致密型，前缘不规则见悬韧带影，腺体密度不均匀，见片状密度增高影，其间夹杂少量乳内脂肪。双乳不对称，左乳较右乳小。右乳内上象限见一卵圆形结节，大小约0.9cm×0.6cm，边缘大部分清晰，密度均与腺体接近，未见异常血管影及恶性钙化。双乳内另见少量散在点状及颗粒状钙化。左乳内未见确切块影。双乳皮下脂肪层清晰，皮肤不厚，乳头正常。右侧腋下见腺体样组织。; Impression: 1、右乳内上象限结节，性质良性，建议短期随访。BI-RADS 3。2、双乳乳腺增生，建议定期复查。BI-RADS 1。3、双乳钙化，考虑良性钙化。BI-RADS 2。4、右侧腋下副乳腺。"]
+    # tool=MammoRGTool()
+    # output=tool.get_output(pred, ref, calculate_ci=True)
+    # print('reference:',ref[0])
+    # print('generated-report:',pred[0])
+    # print('Metrics:',output)
+    pred="Findings: 双侧乳腺显影为不均匀致密类，实质呈索条状、结节样及絮片状，边缘模糊，部分融合； L0片示左侧乳腺上方后1/3见局灶不对称致密影，边缘遮蔽，范围约2.2×1.2cm，内未见钙化及肿 块影; 双侧乳腺皮肤正常，未见厚皮征；乳头无内陷，乳晕区未见异常；皮下脂肪层清晰、透亮；悬韧带 显影正常，未见明显增厚及牵拉征象； 双侧腋前份见淋巴结影，大小及形态未见明显异常。; Impression: 左侧乳腺上方局灶不对称致密影，考虑增生融合所致；双侧乳腺增生、部分增生融合（BI-RADS2 类，建议12个月复查）。"
+    
     tool=MammoRGTool()
-    output=tool.get_output(pred, ref, calculate_ci=True)
-    print('reference:',ref[0])
-    print('generated-report:',pred[0])
-    print('Metrics:',output)
+    output=tool.test(pred)
+    # print('Metrics:',output)
     
     
     
