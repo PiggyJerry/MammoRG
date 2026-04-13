@@ -4,7 +4,7 @@ set -e
 set -o pipefail
 model_name=${MODEL_NAME:-"mammorg"}
 model_base=lmsys/vicuna-7b-v1.5
-model_path=/home/user/MammoRG-main/${model_name}/checkpoints/stage3
+model_path=/home/user/MammoRG-main/${model_name}/checkpoints/stage2
 
 model_base="${1:-$model_base}"
 model_path="${2:-$model_path}"
@@ -12,7 +12,7 @@ model_path="${2:-$model_path}"
 loader="MammoReport_test"
 conv_mode="v1"
 GPUS=(0) #(2 4)
-CHUNKS=${#GPUS[@]}  # 自动计算GPU数量（这里是2）
+CHUNKS=${#GPUS[@]} 
 
 for (( idx=0; idx<$CHUNKS; idx++ ))
 do
