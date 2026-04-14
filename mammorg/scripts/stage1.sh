@@ -5,7 +5,7 @@
 model_base=lmsys/vicuna-7b-v1.5
 output_dir="${1:-./checkpoints}"
 base_dir=${BASE_DIR:-"default_dir"}
-data_path=${base_dir}/mammorg_data/split_data/Train_small.json
+data_path=${base_dir}/mammorg_data/split_data/Train.json
 
 loader="MammoReport_train"
 
