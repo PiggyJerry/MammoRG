@@ -13,7 +13,7 @@ prediction_dir="${3:-results/${model_name}}"
 prediction_file=$prediction_dir/Test
 
 run_name="${4:-${model_name}}"
-query_file=${base_dir}/mammorg_data/split_data/Test_small.json
+query_file=${base_dir}/mammorg_data/split_data/Test.json
 
 image_folder=${base_dir}/mammorg_data
 loader="MammoReport_test"
