@@ -120,10 +120,12 @@ You can use the [processing code](https://github.com/PiggyJerry/MammoRG/blob/mai
 ````
 **Notes before proceeding** 
 - Change the paths in the scripts according to where you output the data.
-- Change the `mm_vision_tower_checkpoint' and `mm_vision_tower_config' in `checkpoints/stage3/config.json' to the path of `VersaMammo.pth' and `versamammo.json' under `llava/model/multimodal_encoder'
+- Change the `mm_vision_tower_checkpoint' and `mm_vision_tower_config' in `checkpoints/stage2_finetune/config.json' to the path of `VersaMammo.pth' and `versamammo.json' under `llava/model/multimodal_encoder'
 - Change the path of the report database file in `llava/model/patient_rag/builder.py' to your file path
 - Change the path of the KG file in `llava/model/graph_model/builder.py' to your file path or ours
-- Change the path of `LLaVA-Mammo-checkpoint' in `llava/model/builder.py' (58 line) and `llava/train/train.py' (943 line) 
+- Change the path of `LLaVA-Mammo-checkpoint' in `llava/model/builder.py' (58 line) and `llava/train/train.py' (943 line)
+- Change the path in `llava/eval/rrg_eval/run.py' (15 line)
+- Change the path of the Test file in `llava/train/llava_trainer.py' (319 line) and the image folder path in `llava/train/llava_trainer.py' (344 line)
 
 ### Start training
 ```bash
