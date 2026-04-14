@@ -316,7 +316,7 @@ class LLaVATrainer(Trainer):
                 return batches
         
         image_processor=model.get_model().get_vision_tower().image_processor
-        all_queries = data_loaders['MammoReport_test']('/home/jiayi/MammoRG-main/mammorg_data/split_data/Test_small.json')
+        all_queries = data_loaders['MammoReport_test']('/home/jiayi/MammoRG-main/mammorg_data/split_data/Test.json')
         queries = get_chunk(all_queries, 1, 0)
 
         batches = create_batches(queries, 64, False, self.tokenizer)
