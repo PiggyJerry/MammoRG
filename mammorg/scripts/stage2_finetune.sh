@@ -15,7 +15,7 @@ vision_tower="versamammo"
 vision_tower_config="${base_dir}/${model_name}/llava/model/multimodal_encoder/versamammo.json"
 vision_tower_checkpoint="${base_dir}/${model_name}/llava/model/multimodal_encoder/VersaMammo.pth" 
 
-data_path=${base_dir}/mammorg_data/split_data/Train_small.json
+data_path=${base_dir}/mammorg_data/split_data/Train.json
 loader="MammoReport_train"
 image_folder=${base_dir}/mammorg_data
 
