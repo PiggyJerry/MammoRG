@@ -1,7 +1,7 @@
 # 🏥 MammoRG
 ## Introduction
 
-Official implementation of MammoRG, introduced in "Cross-Modal Knowledge Retrieval for Mammography Report Generation".
+Official implementation of MammoRG, introduced in "Cross-Modal Clinical Knowledge Integration for Mammography Report Generation".
 
 MammoRG is capable of taking four-view mammogram images of patients (RCC, RMLO, LCC, LMLO) and generating corresponding reports.
 
