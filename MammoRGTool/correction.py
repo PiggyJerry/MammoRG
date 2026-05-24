@@ -607,8 +607,8 @@ def process_samples(data):
                     valid_relation = True
         
         elif rel_type == "Suggestive_of":
-            if ((entity1 in standard_entities["观察"]) and 
-                entity2 in relation_dict[rel_type][entity1]):
+            if ((entity1 in standard_entities["观察"]) and
+                (entity2 in relation_dict.get(rel_type,{}).get(entity1,[]))):
                 valid_relation = True
         
         elif rel_type == "Modified_by":
