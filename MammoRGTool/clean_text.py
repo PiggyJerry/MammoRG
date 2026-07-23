@@ -14,10 +14,18 @@ def normalize_birads_everywhere(text):
         BIRADS3 -> BI-RADS 3
         BI/RADS 0 -> BI-RADS 0
         BI RADS 0 -> BI-RADS 0
+        Bi-Radso -> BI-RADS 0
     """
 
     if not isinstance(text, str):
         return text
+
+    # 将 Bi-Radso、BI-RADS o 等误写改为 BI-RADS 0
+    text = re.sub(
+        r"(?i)\bBI\s*[-/\s]?\s*RADS\s*O(?![A-Za-z])",
+        "BI-RADS 0",
+        text
+    )
 
     def repl(m):
         value = m.group(1).upper()
@@ -257,10 +265,13 @@ def process_text(text):
 
 
 def clean_text(text):
-    # 先保护括号，只对括号外做常规清洗
+    # 先处理 Bi-Radso，避免被 process_text 拆成 BI-RADS o
+    text = normalize_birads_everywhere(text)
+
+    # 再保护括号，只对括号外做常规清洗
     text = apply_outside_parentheses(text, process_text)
 
-    # 再全文标准化 BI-RADS，包括括号内
+    # 最后再次全文标准化 BI-RADS，包括括号内
     text = normalize_birads_everywhere(text)
 
     return text
