@@ -5,7 +5,37 @@ import pandas as pd
 from glob import glob
 from tqdm import tqdm
 
+def normalize_birads_everywhere(text):
+    """
+    全文标准化 BI-RADS，包括括号内：
+        BI-RADS0类 -> BI-RADS 0
+        BI-RADS2类 -> BI-RADS 2
+        BI-RADS4A类 -> BI-RADS 4A
+        BIRADS3 -> BI-RADS 3
+        BI/RADS 0 -> BI-RADS 0
+        BI RADS 0 -> BI-RADS 0
+    """
 
+    if not isinstance(text, str):
+        return text
+
+    def repl(m):
+        value = m.group(1).upper()
+        return f"BI-RADS {value}"
+
+    text = re.sub(
+        r"(?i)\bBI\s*[-/\s]?\s*RADS\s*[:：]?\s*([0-6](?:[A-Ca-c])?)\s*类?",
+        repl,
+        text
+    )
+
+    text = re.sub(
+        r"(?i)\bBIRADS\s*[:：]?\s*([0-6](?:[A-Ca-c])?)\s*类?",
+        repl,
+        text
+    )
+
+    return text
 def convert_roman_to_arabic(roman):
     roman_map = {
         'I': '1', 'II': '2', 'III': '3', 'IV': '4', 'V': '5', 'VI': '6',
@@ -227,5 +257,10 @@ def process_text(text):
 
 
 def clean_text(text):
-    # 关键：括号内不改动
-    return apply_outside_parentheses(text, process_text)
+    # 先保护括号，只对括号外做常规清洗
+    text = apply_outside_parentheses(text, process_text)
+
+    # 再全文标准化 BI-RADS，包括括号内
+    text = normalize_birads_everywhere(text)
+
+    return text
