@@ -157,3 +157,43 @@ Here is an example for how to use MammoRGTool to evaluate:
 cd MammoRGTool
 python tool.py
 ```
+
+## Mammography Lexicon and Relation Schema
+
+MammoRG uses a predefined mammography lexicon to support structured report parsing, knowledge-graph construction, and term-aware tokenization. The current lexicon contains terms related to breast composition, BI-RADS assessment, abnormal findings, anatomical locations, imaging descriptors, and diagnostic suggestions.
+
+### Lexicon Categories
+
+| Category | Number of terms | Terms |
+|---|---:|---|
+| Breast composition | 4 | 脂肪型, 纤维腺体型, 不均匀致密型, 致密型 |
+| Diagnostic suggestion | 9 | BI-RADS 0, BI-RADS 1, BI-RADS 2, BI-RADS 3, BI-RADS 4A, BI-RADS 4B, BI-RADS 4C, BI-RADS 5, BI-RADS 6, 乳腺癌 |
+| Abnormal findings | 10 | 钙化, 肿块, 乳腺增生, 皮肤增厚, 淋巴结肿大, 乳头凹陷, 结构扭曲, 悬韧带增粗, 结节, 结构不对称 |
+| Anatomical locations | 18 | 左乳外上象限, 双乳, 左侧中央区, 右侧中央区, 右乳外下象限, 右乳, 左乳, 右乳外上象限, 右乳内上象限, 右乳内下象限, 左乳内下象限, 左乳外下象限, 左乳内上象限, 左侧乳晕区, 右侧乳晕区, 右侧腋下, 双侧腋下, 左侧腋下 |
+| Imaging descriptors | 28 | 圆形, 密度均匀, 分叶状, 局部不规则, 颗粒状, 壳样, 类圆形, 密度增高, 边缘模糊, 边缘清晰, 部分边缘模糊, 卵圆形, 模糊, 密度不均匀, 线虫样, 结节状, 点状, 不规则, 边缘不规则, 局部, 密度增高且不均匀, 粗糙不均质, 部分边缘清晰, 局灶性, 毛刺影, 斑点状, 簇状, 模糊不定形 |
+
+### Relation Schema
+
+MammoRG uses three predefined relation types to represent structured semantic associations among mammography concepts:
+
+| Relation type | Description | Head entity type | Tail entity type |
+|---|---|---|---|
+| `Located_at` | Associates an abnormal finding with its anatomical location. | Abnormal finding | Anatomical location |
+| `Modified_by` | Associates an abnormal finding with its imaging descriptor or morphological characteristic. | Abnormal finding | Imaging descriptor |
+| `Suggestive_of` | Associates an abnormal finding with a diagnostic assessment or diagnostic suggestion. | Abnormal finding | BI-RADS category or diagnostic suggestion |
+
+Each relation is represented as an exact triplet:
+
+```text
+[head entity, relation type, tail entity]
+```
+
+## Citation
+If you use this code or models in your scientific work, please kindly cite our paper: 
+```bibtex
+@article{zhu2026cross,
+  title={Cross-Modal Clinical Knowledge Integration for Mammography Report Generation},
+  author={Zhu, Jiayi and Huang, Fuxiang and Xie, Yu and Wang, Xi and Chen, Zhixuan and Guo, Yuan and Kong, Qingcong and Li, Zhenhui and Luo, Qiong and Chen, Hao},
+  journal={arXiv preprint arXiv:2605.31093},
+  year={2026}
+}
