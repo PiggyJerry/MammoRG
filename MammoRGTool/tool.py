@@ -62,22 +62,9 @@ def rule_based_get_birads(conclusion, laterality):
         return None
     conclusion = str(conclusion)
 
-    # 1) 只用 Impression 段，避免 Findings 的“左乳/右乳/双乳”干扰侧别关联
     m = re.search(r'Impression\s*[:：]', conclusion, flags=re.IGNORECASE)
     text = conclusion[m.end():] if m else conclusion
 
-    # 2) 更宽松的 BI-RADS 识别：BI-RADS分类：3 / BI RADS 3 / BI/RADS 3 / BI-RADS 4A / BIRADS 2 / 分类：2
-    # birads_pattern = re.compile(
-    #     r'(?:'
-    #     r'BI\s*[-/\s]?\s*RADS'      # BI-RADS / BI RADS / BI/RADS
-    #     r'|BIRADS'                  # BIRADS
-    #     r'|Bi\s*[-/\s]?\s*Rads'     # BI-RADS / Bi Rads
-    #     r'|分类'
-    #     r')'
-    #     r'(?:\s*分类)?\s*[:：]?\s*'
-    #     r'([IVXivxⅠⅡⅢⅣⅤⅥⅰⅱⅲⅳⅴⅵ]+|\d+(?:[a-cA-C])?)',
-    #     re.IGNORECASE
-    # )
     birads_pattern = re.compile(
         r'(?:BI\s*[-/\s]?\s*RADS|BIRADS|Bi\s*[-/\s]?\s*Rads|分类)'
         r'(?:\s*分类)?\s*[:：]?\s*'
@@ -91,15 +78,12 @@ def rule_based_get_birads(conclusion, laterality):
         'double': ['双侧乳', '双乳', '双侧'],
     }
 
-    # 3) 找 text 内所有侧别位置（长词优先）
     side_positions = []
     for side_type, kws in side_keywords.items():
         for kw in sorted(kws, key=len, reverse=True):
             for sm in re.finditer(re.escape(kw), text):
                 side_positions.append({'pos': sm.start(), 'type': side_type})
     side_positions.sort(key=lambda x: x['pos'])
-
-    # 4) 找所有 BI-RADS，并做标准化 + 打分
     birads_matches = []
     for bm in birads_pattern.finditer(text):
         raw = bm.group(1).upper()
@@ -120,7 +104,6 @@ def rule_based_get_birads(conclusion, laterality):
     if not birads_matches:
         return None
 
-    # 5) 侧别关联：只在 Impression 段里做“前面最近侧别”
     birads_with_sides = []
     for b in birads_matches:
         preceding = [s for s in side_positions if s['pos'] < b['start']]
@@ -150,8 +133,6 @@ def rule_based_get_birads(conclusion, laterality):
 
     best = max(valid, key=lambda x: x['priority'])
 
-    # 7) 返回标准类名（必须匹配你的 BI_RADS_CLASSES）
-    # norm_num 可能是 '4a' -> 输出 '4A'
     num = best['norm_num']
     if re.match(r'^\d+[a-c]$', num):
         num_out = num[:-1] + num[-1].upper()
@@ -173,8 +154,6 @@ def merge_birads_sentences(sentences):
         )
         has_entity = any(entity in s for entity in ENTITY_NAMES)
 
-        # 只有当前句包含 BI-RADS、但不包含任何异常实体时，
-        # 才认为它是上一句的独立 BI-RADS 补充说明
         if has_birads and not has_entity and merged:
             merged[-1] += "。" + s
         else:
@@ -447,10 +426,6 @@ def vector_to_dict(
     process_lymph_node_not_seen()
 
     def reset_unmentioned_positive_entities():
-        """
-        如果正文中完全没有出现指定异常名称，但模型将其预测为 POS，
-        则将该侧状态改为 BLA。已经被规则修正为 NEG 的状态不会受影响。
-        """
         entities_requiring_explicit_mention = [
             '淋巴结肿大',
             '乳头凹陷',
@@ -468,7 +443,6 @@ def vector_to_dict(
                 if breast['Entities'].get(entity) == 'POS':
                     breast['Entities'][entity] = 'BLA'
 
-    # 放在所有实体规则之后执行，清除模型对未提及异常的 POS 误报。
     reset_unmentioned_positive_entities()
     
     return {
@@ -506,16 +480,27 @@ def compute_macro_positive_f1(
     return_per_entity: bool = False
 ):
     """
-    Compute macro positive-class F1 across abnormality types.
+    Compute macro positive-class F1 across active abnormality types.
 
-    For each entity, POS is treated as the positive class (1) and NEG as
-    the negative class (0). The positive-class F1 is calculated separately
-    for every entity and then macro-averaged across entities that have at
-    least one evaluable reference label.
+    Definition
+    ----------
+    1. POS is the positive class (1); every non-POS state is treated as 0.
+    2. Each finding/entity is evaluated separately across its available
+       breast-side observations.
+    3. An entity is "active" only if it is POS at least once in either the
+       reference or the prediction.
+    4. For each active entity:
 
-    An entity with evaluable labels but no positive reference/prediction is
-    assigned F1=0 through ``zero_division=0``. This matches sklearn's
-    multilabel ``f1_score(..., average='macro', zero_division=0)`` behavior.
+           F1_k = 2 * TP_k / (#Pred_POS_k + #Ref_POS_k)
+
+       which is equivalent to the positive-class binary F1.
+    5. The final Finding score is the macro-average over active entities.
+    6. If neither reference nor prediction contains any POS finding at all,
+       Finding score is defined as 1.0 (empty-set agreement).
+
+    Therefore, entities that are non-POS in both reference and prediction
+    (e.g. NEG-NEG, BLA-BLA, UNC-UNC, or other non-POS combinations) do not
+    enter the macro-average denominator.
     """
     if entity_names is None:
         entity_names = ENTITY_NAMES
@@ -526,29 +511,37 @@ def compute_macro_positive_f1(
         y_true = true_by_entity.get(entity, [])
         y_pred = pred_by_entity.get(entity, [])
 
-        if len(y_true) == 0:
-            continue
-
         if len(y_true) != len(y_pred):
             raise ValueError(
                 f"Entity '{entity}' has mismatched label lengths: "
                 f"{len(y_true)} vs {len(y_pred)}."
             )
 
+        if len(y_true) == 0:
+            continue
+
+        y_true_arr = np.asarray(y_true, dtype=np.int8)
+        y_pred_arr = np.asarray(y_pred, dtype=np.int8)
+
+        ref_pos = int(np.sum(y_true_arr == 1))
+        pred_pos = int(np.sum(y_pred_arr == 1))
+
+        # No POS in either side -> this entity is not active and is excluded
+        # from the macro-average denominator.
+        if ref_pos + pred_pos == 0:
+            continue
+
+        tp = int(np.sum((y_true_arr == 1) & (y_pred_arr == 1)))
         per_entity_f1[entity] = float(
-            f1_score(
-                y_true,
-                y_pred,
-                average='binary',
-                pos_label=1,
-                zero_division=0
-            )
+            (2.0 * tp) / (ref_pos + pred_pos)
         )
 
+    # If there is no active finding anywhere in either reference or prediction,
+    # define the score as 1.0: both sides agree on having no positive finding.
     macro_f1 = (
         float(np.mean(list(per_entity_f1.values())))
         if per_entity_f1
-        else None
+        else 1.0
     )
 
     if return_per_entity:
@@ -896,7 +889,8 @@ class MammoRGTool(object):
         all_true_birads, all_pred_birads = [], []
 
         # Keep every abnormality in a separate list so that we can compute
-        # positive-class F1 per entity and then macro-average across entities.
+        # positive-class F1 per active entity and then macro-average only
+        # across entities with at least one POS in ref or prediction.
         entity_true_by_name = {entity: [] for entity in ENTITY_NAMES}
         entity_pred_by_name = {entity: [] for entity in ENTITY_NAMES}
         
@@ -999,8 +993,15 @@ class MammoRGTool(object):
             true_right = ref_output['Breast_assessment']['Right_breast']['Entities']
             pred_right = pred_output['Breast_assessment']['Right_breast']['Entities']
 
-            # Treat left and right breasts as separate evaluable instances,
-            # while preserving the abnormality dimension for macro averaging.
+            # Treat left and right breasts as separate binary POS/non-POS
+            # observations for each finding. Only POS matters for the Finding
+            # score; NEG/UNC/BLA are all treated as non-POS (0).
+            #
+            # IMPORTANT:
+            # We keep every breast side here so that a prediction-only POS
+            # (e.g. ref=BLA/UNC, pred=POS) is counted as a false positive.
+            # Entities with no POS in either ref or pred are later excluded
+            # from the macro-average denominator by compute_macro_positive_f1().
             for entity in ENTITY_NAMES:
                 for true_entities, pred_entities in (
                     (true_left, pred_left),
@@ -1009,34 +1010,23 @@ class MammoRGTool(object):
                     true_state = true_entities.get(entity, "BLA")
                     pred_state = pred_entities.get(entity, "BLA")
 
-                    # Only POS/NEG reference labels are evaluable.
-                    if true_state not in ["POS", "NEG"]:
-                        continue
-
-                    sample_should_evaluate['entities'] += 1
-                    total_should_evaluate['entities'] += 1
-
                     true_label = 1 if true_state == "POS" else 0
-
-                    if pred_state == "POS":
-                        pred_label = 1
-                        sample_actual_evaluate['entities'] += 1
-                        total_actual_evaluate['entities'] += 1
-                    elif pred_state == "NEG":
-                        pred_label = 0
-                        sample_actual_evaluate['entities'] += 1
-                        total_actual_evaluate['entities'] += 1
-                    else:
-                        # Preserve the original behavior: UNC/BLA is treated
-                        # as absence. Thus it is an FN for a POS reference and
-                        # a TN for a NEG reference.
-                        pred_label = 0
+                    pred_label = 1 if pred_state == "POS" else 0
 
                     entity_true_by_name[entity].append(true_label)
                     entity_pred_by_name[entity].append(pred_label)
                     sample_true_entities[entity].append(true_label)
                     sample_pred_entities[entity].append(pred_label)
-            
+
+                    # These counters are retained only for bookkeeping.
+                    # A side is "active" for Finding evaluation if either
+                    # reference or prediction is POS.
+                    if true_label == 1 or pred_label == 1:
+                        sample_should_evaluate['entities'] += 1
+                        total_should_evaluate['entities'] += 1
+                        sample_actual_evaluate['entities'] += 1
+                        total_actual_evaluate['entities'] += 1
+
             density_f1 = None
             if len(sample_true_density) > 0:
                 correct = sum(
@@ -1284,7 +1274,7 @@ class MammoRGTool(object):
         status_metrics = {
             'composition_f1': metrics.get('density', None),
             'birads_f1': metrics.get('bi_rads', None),
-            # Macro average of the positive-class F1 across abnormalities.
+            # Macro positive-class F1 across active abnormalities only.
             'finding_f1': metrics.get('entities', None),
         }
 
@@ -1354,19 +1344,6 @@ class MammoRGTool(object):
             return_bootstrap=return_bootstrap
         )
 
-if __name__ == "__main__":
-    # pred=["Findings: 双乳基本对称，呈不均匀致密型，见斑片状、结节状密影及脂肪组织填充，双乳未见明确肿块影及钙化灶。双乳悬韧带增粗，未见明确血管增多及导管增粗。双乳皮肤、乳晕及乳头未见明显异常。左乳乳内见一淋巴结影，大小约9mm*6mm。; Impression: 1.双乳呈不均匀致密型。 2.右乳符合BI-RADS 0，建议乳腺MRI检查。 3.左乳符合BI-RADS 2，左乳乳内一淋巴结。"]
-    # ref=["Findings: 双乳呈致密型，前缘不规则见悬韧带影，腺体密度不均匀，见片状密度增高影，其间夹杂少量乳内脂肪。双乳不对称，左乳较右乳小。右乳内上象限见一卵圆形结节，大小约0.9cm×0.6cm，边缘大部分清晰，密度均与腺体接近，未见异常血管影及恶性钙化。双乳内另见少量散在点状及颗粒状钙化。左乳内未见确切块影。双乳皮下脂肪层清晰，皮肤不厚，乳头正常。右侧腋下见腺体样组织。; Impression: 1、右乳内上象限结节，性质良性，建议短期随访。BI-RADS 3。2、双乳乳腺增生，建议定期复查。BI-RADS 1。3、双乳钙化，考虑良性钙化。BI-RADS 2。4、右侧腋下副乳腺。"]
-    # tool=MammoRGTool()
-    # output=tool.get_output(pred, ref, calculate_ci=True)
-    # print('reference:',ref[0])
-    # print('generated-report:',pred[0])
-    # print('Metrics:',output)
-    pred="Findings: 双侧乳腺显影为不均匀致密类，实质呈索条状、结节样及絮片状，边缘模糊，部分融合； L0片示左侧乳腺上方后1/3见局灶不对称致密影，边缘遮蔽，范围约2.2×1.2cm，内未见钙化及肿 块影; 双侧乳腺皮肤正常，未见厚皮征；乳头无内陷，乳晕区未见异常；皮下脂肪层清晰、透亮；悬韧带 显影正常，未见明显增厚及牵拉征象； 双侧腋前份见淋巴结影，大小及形态未见明显异常。; Impression: 左侧乳腺上方局灶不对称致密影，考虑增生融合所致；双侧乳腺增生、部分增生融合（BI-RADS2 类，建议12个月复查）。"
-    
-    tool=MammoRGTool()
-    output=tool.test(pred)
-    # print('Metrics:',output)
     
     
     
