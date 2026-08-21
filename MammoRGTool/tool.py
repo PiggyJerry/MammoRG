@@ -65,6 +65,7 @@ def rule_based_get_birads(conclusion, laterality):
     m = re.search(r'Impression\s*[:：]', conclusion, flags=re.IGNORECASE)
     text = conclusion[m.end():] if m else conclusion
 
+
     birads_pattern = re.compile(
         r'(?:BI\s*[-/\s]?\s*RADS|BIRADS|Bi\s*[-/\s]?\s*Rads|分类)'
         r'(?:\s*分类)?\s*[:：]?\s*'
@@ -78,12 +79,15 @@ def rule_based_get_birads(conclusion, laterality):
         'double': ['双侧乳', '双乳', '双侧'],
     }
 
+
     side_positions = []
     for side_type, kws in side_keywords.items():
         for kw in sorted(kws, key=len, reverse=True):
             for sm in re.finditer(re.escape(kw), text):
                 side_positions.append({'pos': sm.start(), 'type': side_type})
     side_positions.sort(key=lambda x: x['pos'])
+
+
     birads_matches = []
     for bm in birads_pattern.finditer(text):
         raw = bm.group(1).upper()
@@ -96,13 +100,14 @@ def rule_based_get_birads(conclusion, laterality):
             norm_num = raw
 
         birads_matches.append({
-            'norm_num': norm_num,  # 用于优先级
+            'norm_num': norm_num, 
             'priority': birads_priority.get(norm_num, -1),
             'start': bm.start(),
         })
 
     if not birads_matches:
         return None
+
 
     birads_with_sides = []
     for b in birads_matches:
@@ -114,7 +119,7 @@ def rule_based_get_birads(conclusion, laterality):
             'side_type': nearest['type'] if nearest else None
         })
 
-    # 6) laterality 过滤（优先单侧，其次 double）
+ 
     if laterality == 'L':
         valid = (
             [x for x in birads_with_sides if x['side_type'] == 'left'] +
@@ -132,6 +137,7 @@ def rule_based_get_birads(conclusion, laterality):
         return None
 
     best = max(valid, key=lambda x: x['priority'])
+
 
     num = best['norm_num']
     if re.match(r'^\d+[a-c]$', num):
@@ -154,6 +160,7 @@ def merge_birads_sentences(sentences):
         )
         has_entity = any(entity in s for entity in ENTITY_NAMES)
 
+  
         if has_birads and not has_entity and merged:
             merged[-1] += "。" + s
         else:
@@ -443,6 +450,7 @@ def vector_to_dict(
                 if breast['Entities'].get(entity) == 'POS':
                     breast['Entities'][entity] = 'BLA'
 
+
     reset_unmentioned_positive_entities()
     
     return {
@@ -473,81 +481,64 @@ def compute_sample_f1(y_true: List[int], y_pred: List[int], labels_all: List[int
             return float(f1_score(y_true_arr, y_pred_arr, average='macro', zero_division=0))
 
 
-def compute_macro_positive_f1(
-    true_by_entity: Dict[str, List[int]],
-    pred_by_entity: Dict[str, List[int]],
-    entity_names: List[str] = None,
-    return_per_entity: bool = False
-):
+def set_level_f1(ref_set, pred_set) -> float:
     """
-    Compute macro positive-class F1 across active abnormality types.
+    Symmetric set-level F1 / Dice similarity:
 
-    Definition
-    ----------
-    1. POS is the positive class (1); every non-POS state is treated as 0.
-    2. Each finding/entity is evaluated separately across its available
-       breast-side observations.
-    3. An entity is "active" only if it is POS at least once in either the
-       reference or the prediction.
-    4. For each active entity:
+        F1 = 2 * |ref ∩ pred| / (|ref| + |pred|)
 
-           F1_k = 2 * TP_k / (#Pred_POS_k + #Ref_POS_k)
+    Empty-set convention:
+      - both empty -> 1.0
+      - only one empty -> 0.0
+    """
+    ref_set = set(ref_set)
+    pred_set = set(pred_set)
 
-       which is equivalent to the positive-class binary F1.
-    5. The final Finding score is the macro-average over active entities.
-    6. If neither reference nor prediction contains any POS finding at all,
-       Finding score is defined as 1.0 (empty-set agreement).
+    if not ref_set and not pred_set:
+        return 1.0
 
-    Therefore, entities that are non-POS in both reference and prediction
-    (e.g. NEG-NEG, BLA-BLA, UNC-UNC, or other non-POS combinations) do not
-    enter the macro-average denominator.
+    return float(
+        2.0 * len(ref_set & pred_set) /
+        (len(ref_set) + len(pred_set))
+    )
+
+
+def compute_side_aware_finding_set_f1(
+    true_left: Dict[str, str],
+    pred_left: Dict[str, str],
+    true_right: Dict[str, str],
+    pred_right: Dict[str, str],
+    entity_names: List[str] = None,
+) -> float:
+    """
+    POS-only, side-aware set-level F1 for Findings.
+
+    Each set element is (side, finding), so:
+        ('L', '肿块') != ('R', '肿块')
+
+    NEG / UNC / BLA do not enter the sets.
+
+        S_findings = 2 * |F_ref ∩ F_pred| / (|F_ref| + |F_pred|)
+
+    If both reports contain no POS findings, score = 1.0.
     """
     if entity_names is None:
         entity_names = ENTITY_NAMES
 
-    per_entity_f1 = {}
+    ref_findings = set()
+    pred_findings = set()
 
-    for entity in entity_names:
-        y_true = true_by_entity.get(entity, [])
-        y_pred = pred_by_entity.get(entity, [])
+    for side, true_entities, pred_entities in (
+        ("L", true_left, pred_left),
+        ("R", true_right, pred_right),
+    ):
+        for entity in entity_names:
+            if true_entities.get(entity, "BLA") == "POS":
+                ref_findings.add((side, entity))
+            if pred_entities.get(entity, "BLA") == "POS":
+                pred_findings.add((side, entity))
 
-        if len(y_true) != len(y_pred):
-            raise ValueError(
-                f"Entity '{entity}' has mismatched label lengths: "
-                f"{len(y_true)} vs {len(y_pred)}."
-            )
-
-        if len(y_true) == 0:
-            continue
-
-        y_true_arr = np.asarray(y_true, dtype=np.int8)
-        y_pred_arr = np.asarray(y_pred, dtype=np.int8)
-
-        ref_pos = int(np.sum(y_true_arr == 1))
-        pred_pos = int(np.sum(y_pred_arr == 1))
-
-        # No POS in either side -> this entity is not active and is excluded
-        # from the macro-average denominator.
-        if ref_pos + pred_pos == 0:
-            continue
-
-        tp = int(np.sum((y_true_arr == 1) & (y_pred_arr == 1)))
-        per_entity_f1[entity] = float(
-            (2.0 * tp) / (ref_pos + pred_pos)
-        )
-
-    # If there is no active finding anywhere in either reference or prediction,
-    # define the score as 1.0: both sides agree on having no positive finding.
-    macro_f1 = (
-        float(np.mean(list(per_entity_f1.values())))
-        if per_entity_f1
-        else 1.0
-    )
-
-    if return_per_entity:
-        return macro_f1, per_entity_f1
-
-    return macro_f1
+    return set_level_f1(ref_findings, pred_findings)
 
 
 class MammoRGTool(object):
@@ -888,11 +879,8 @@ class MammoRGTool(object):
         all_true_density, all_pred_density = [], []
         all_true_birads, all_pred_birads = [], []
 
-        # Keep every abnormality in a separate list so that we can compute
-        # positive-class F1 per active entity and then macro-average only
-        # across entities with at least one POS in ref or prediction.
-        entity_true_by_name = {entity: [] for entity in ENTITY_NAMES}
-        entity_pred_by_name = {entity: [] for entity in ENTITY_NAMES}
+        # Findings are evaluated per report using a POS-only, side-aware
+        # set-level F1, then averaged across reports.
         
         total_should_evaluate = {'density': 0, 'birads': 0, 'entities': 0}
         total_actual_evaluate = {'density': 0, 'birads': 0, 'entities': 0}
@@ -905,17 +893,14 @@ class MammoRGTool(object):
             relation_correct = len(pred_output['Triples'] & ref_output['Triples'])
             pred_count = len(pred_output['Triples'])
             gold_count = len(ref_output['Triples'])
-            all_relations_data.append((relation_correct, pred_count, gold_count))
 
-            p = relation_correct / (
-                pred_count + 1e-10
+            # Relation-set F1. If both reports have no relations, score = 1.0.
+            relations_f1 = set_level_f1(
+                ref_output['Triples'],
+                pred_output['Triples'],
             )
-            r = relation_correct / (
-                gold_count + 1e-10
-            )
-            relations_f1 = (
-                2 * p * r /
-                (p + r + 1e-10)
+            all_relations_data.append(
+                (relation_correct, pred_count, gold_count, relations_f1)
             )
         
             sample_true_density = []
@@ -993,15 +978,8 @@ class MammoRGTool(object):
             true_right = ref_output['Breast_assessment']['Right_breast']['Entities']
             pred_right = pred_output['Breast_assessment']['Right_breast']['Entities']
 
-            # Treat left and right breasts as separate binary POS/non-POS
-            # observations for each finding. Only POS matters for the Finding
-            # score; NEG/UNC/BLA are all treated as non-POS (0).
-            #
-            # IMPORTANT:
-            # We keep every breast side here so that a prediction-only POS
-            # (e.g. ref=BLA/UNC, pred=POS) is counted as a false positive.
-            # Entities with no POS in either ref or pred are later excluded
-            # from the macro-average denominator by compute_macro_positive_f1().
+            # POS-only, side-aware Finding representation.
+            # (L, finding) and (R, finding) are distinct set elements.
             for entity in ENTITY_NAMES:
                 for true_entities, pred_entities in (
                     (true_left, pred_left),
@@ -1013,14 +991,10 @@ class MammoRGTool(object):
                     true_label = 1 if true_state == "POS" else 0
                     pred_label = 1 if pred_state == "POS" else 0
 
-                    entity_true_by_name[entity].append(true_label)
-                    entity_pred_by_name[entity].append(pred_label)
                     sample_true_entities[entity].append(true_label)
                     sample_pred_entities[entity].append(pred_label)
 
-                    # These counters are retained only for bookkeeping.
-                    # A side is "active" for Finding evaluation if either
-                    # reference or prediction is POS.
+                    # Retained for bookkeeping only.
                     if true_label == 1 or pred_label == 1:
                         sample_should_evaluate['entities'] += 1
                         total_should_evaluate['entities'] += 1
@@ -1045,9 +1019,11 @@ class MammoRGTool(object):
 
                 birads_f1 = correct / len(sample_true_birads)
 
-            entities_f1 = compute_macro_positive_f1(
-                sample_true_entities,
-                sample_pred_entities
+            entities_f1 = compute_side_aware_finding_set_f1(
+                true_left=true_left,
+                pred_left=pred_left,
+                true_right=true_right,
+                pred_right=pred_right,
             )
             
             per_sample_f1.append({
@@ -1065,6 +1041,8 @@ class MammoRGTool(object):
                 'true_entities': sample_true_entities,
                 'pred_entities': sample_pred_entities,
                 'relations_data': (relation_correct, pred_count, gold_count),
+                'finding_f1': entities_f1,
+                'relation_f1': relations_f1,
                 'should_evaluate': sample_should_evaluate,
                 'actual_evaluate': sample_actual_evaluate
             }
@@ -1094,22 +1072,22 @@ class MammoRGTool(object):
         else:
             metrics['bi_rads'] = -1
         
-        entity_macro_f1 = compute_macro_positive_f1(
-            entity_true_by_name,
-            entity_pred_by_name
-        )
+        # Mean report-level POS-only, side-aware Finding set-F1.
+        finding_scores = [x['finding_f1'] for x in per_sample_f1]
         metrics['entities'] = (
-            entity_macro_f1
-            if entity_macro_f1 is not None
+            float(np.mean(finding_scores))
+            if finding_scores
             else -1
         )
 
-        total_correct = sum(c for c, _, _ in all_relations_data)
-        total_pred = sum(p for _, p, _ in all_relations_data)
-        total_gold = sum(g for _, _, g in all_relations_data)
-        precision = total_correct / (total_pred + 1e-10)
-        recall = total_correct / (total_gold + 1e-10)
-        f1 = 2 * precision * recall / (precision + recall + 1e-10)
+        # Mean report-level Relation set-F1.
+        # Empty-vs-empty relation sets contribute 1.0.
+        relation_scores = [x['relation_f1'] for x in per_sample_f1]
+        f1 = (
+            float(np.mean(relation_scores))
+            if relation_scores
+            else -1
+        )
 
         if calculate_ci or return_bootstrap:
             n_samples = len(sample_data_list)
@@ -1158,13 +1136,8 @@ class MammoRGTool(object):
                 resampled_pred_density = []
                 resampled_true_birads = []
                 resampled_pred_birads = []
-                resampled_true_entities = {
-                    entity: [] for entity in ENTITY_NAMES
-                }
-                resampled_pred_entities = {
-                    entity: [] for entity in ENTITY_NAMES
-                }
-                resampled_relations = []
+                resampled_finding_scores = []
+                resampled_relation_scores = []
 
                 resampled_should_density = 0
                 resampled_actual_density = 0
@@ -1180,15 +1153,12 @@ class MammoRGTool(object):
                     resampled_true_birads.extend(sample_data['true_birads'])
                     resampled_pred_birads.extend(sample_data['pred_birads'])
 
-                    for entity in ENTITY_NAMES:
-                        resampled_true_entities[entity].extend(
-                            sample_data['true_entities'][entity]
-                        )
-                        resampled_pred_entities[entity].extend(
-                            sample_data['pred_entities'][entity]
-                        )
-
-                    resampled_relations.append(sample_data['relations_data'])
+                    resampled_finding_scores.append(
+                        sample_data['finding_f1']
+                    )
+                    resampled_relation_scores.append(
+                        sample_data['relation_f1']
+                    )
 
                     resampled_should_density += sample_data['should_evaluate']['density']
                     resampled_actual_density += sample_data['actual_evaluate']['density']
@@ -1225,22 +1195,15 @@ class MammoRGTool(object):
                     )
                     bootstrapped_birads[bootstrap_id] = raw_f1 * completeness
 
-                entity_macro_f1 = compute_macro_positive_f1(
-                    resampled_true_entities,
-                    resampled_pred_entities,
-                )
-                if entity_macro_f1 is not None:
-                    bootstrapped_entities[bootstrap_id] = entity_macro_f1
+                if resampled_finding_scores:
+                    bootstrapped_entities[bootstrap_id] = float(
+                        np.mean(resampled_finding_scores)
+                    )
 
-                total_c = sum(c for c, _, _ in resampled_relations)
-                total_p = sum(p for _, p, _ in resampled_relations)
-                total_g = sum(g for _, _, g in resampled_relations)
-                precision_boot = total_c / (total_p + 1e-10)
-                recall_boot = total_c / (total_g + 1e-10)
-                bootstrapped_relations_f1[bootstrap_id] = (
-                    2 * precision_boot * recall_boot /
-                    (precision_boot + recall_boot + 1e-10)
-                )
+                if resampled_relation_scores:
+                    bootstrapped_relations_f1[bootstrap_id] = float(
+                        np.mean(resampled_relation_scores)
+                    )
 
             def finite_ci(values):
                 values = np.asarray(values, dtype=np.float64)
@@ -1274,7 +1237,7 @@ class MammoRGTool(object):
         status_metrics = {
             'composition_f1': metrics.get('density', None),
             'birads_f1': metrics.get('bi_rads', None),
-            # Macro positive-class F1 across active abnormalities only.
+            # Mean report-level POS-only, side-aware set F1.
             'finding_f1': metrics.get('entities', None),
         }
 
@@ -1344,6 +1307,5 @@ class MammoRGTool(object):
             return_bootstrap=return_bootstrap
         )
 
-    
     
     
