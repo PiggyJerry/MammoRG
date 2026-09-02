@@ -62,10 +62,22 @@ def rule_based_get_birads(conclusion, laterality):
         return None
     conclusion = str(conclusion)
 
+    # 1) 只用 Impression 段，避免 Findings 的“左乳/右乳/双乳”干扰侧别关联
     m = re.search(r'Impression\s*[:：]', conclusion, flags=re.IGNORECASE)
     text = conclusion[m.end():] if m else conclusion
 
-
+    # 2) 更宽松的 BI-RADS 识别：BI-RADS分类：3 / BI RADS 3 / BI/RADS 3 / BI-RADS 4A / BIRADS 2 / 分类：2
+    # birads_pattern = re.compile(
+    #     r'(?:'
+    #     r'BI\s*[-/\s]?\s*RADS'      # BI-RADS / BI RADS / BI/RADS
+    #     r'|BIRADS'                  # BIRADS
+    #     r'|Bi\s*[-/\s]?\s*Rads'     # BI-RADS / Bi Rads
+    #     r'|分类'
+    #     r')'
+    #     r'(?:\s*分类)?\s*[:：]?\s*'
+    #     r'([IVXivxⅠⅡⅢⅣⅤⅥⅰⅱⅲⅳⅴⅵ]+|\d+(?:[a-cA-C])?)',
+    #     re.IGNORECASE
+    # )
     birads_pattern = re.compile(
         r'(?:BI\s*[-/\s]?\s*RADS|BIRADS|Bi\s*[-/\s]?\s*Rads|分类)'
         r'(?:\s*分类)?\s*[:：]?\s*'
@@ -79,7 +91,7 @@ def rule_based_get_birads(conclusion, laterality):
         'double': ['双侧乳', '双乳', '双侧'],
     }
 
-
+    # 3) 找 text 内所有侧别位置（长词优先）
     side_positions = []
     for side_type, kws in side_keywords.items():
         for kw in sorted(kws, key=len, reverse=True):
@@ -87,7 +99,7 @@ def rule_based_get_birads(conclusion, laterality):
                 side_positions.append({'pos': sm.start(), 'type': side_type})
     side_positions.sort(key=lambda x: x['pos'])
 
-
+    # 4) 找所有 BI-RADS，并做标准化 + 打分
     birads_matches = []
     for bm in birads_pattern.finditer(text):
         raw = bm.group(1).upper()
@@ -100,7 +112,7 @@ def rule_based_get_birads(conclusion, laterality):
             norm_num = raw
 
         birads_matches.append({
-            'norm_num': norm_num, 
+            'norm_num': norm_num,  # 用于优先级
             'priority': birads_priority.get(norm_num, -1),
             'start': bm.start(),
         })
@@ -108,7 +120,7 @@ def rule_based_get_birads(conclusion, laterality):
     if not birads_matches:
         return None
 
-
+    # 5) 侧别关联：只在 Impression 段里做“前面最近侧别”
     birads_with_sides = []
     for b in birads_matches:
         preceding = [s for s in side_positions if s['pos'] < b['start']]
@@ -119,7 +131,7 @@ def rule_based_get_birads(conclusion, laterality):
             'side_type': nearest['type'] if nearest else None
         })
 
- 
+    # 6) laterality 过滤（优先单侧，其次 double）
     if laterality == 'L':
         valid = (
             [x for x in birads_with_sides if x['side_type'] == 'left'] +
@@ -138,7 +150,8 @@ def rule_based_get_birads(conclusion, laterality):
 
     best = max(valid, key=lambda x: x['priority'])
 
-
+    # 7) 返回标准类名（必须匹配你的 BI_RADS_CLASSES）
+    # norm_num 可能是 '4a' -> 输出 '4A'
     num = best['norm_num']
     if re.match(r'^\d+[a-c]$', num):
         num_out = num[:-1] + num[-1].upper()
@@ -160,8 +173,34 @@ def merge_birads_sentences(sentences):
         )
         has_entity = any(entity in s for entity in ENTITY_NAMES)
 
-  
-        if has_birads and not has_entity and merged:
+        # 如果当前句已经明确写了左乳、右乳或双乳，它本身就是一条完整的
+        # 乳房级评估，不能因为没有异常实体而并入上一条病灶描述。
+        has_laterality = bool(
+            re.search(r"左乳|右乳|双乳|左侧乳|右侧乳|双侧乳", s)
+        )
+
+        # 只合并真正独立的“BI-RADS 3”式补充句。像
+        # “左乳符合 BI-RADS 3，右乳符合 BI-RADS 2”这样的完整评估句
+        # 必须保留为独立句，否则会把上一句的所有病灶与两个 BI-RADS
+        # 交叉配对。
+        standalone_birads = bool(
+            re.fullmatch(
+                r"\s*[（(]?\s*"
+                r"BI\s*[-/\s]?\s*RADS\s*[:：]?\s*[0-6](?:[A-Ca-c])?\s*[类级]?"
+                r"(?:\s*[，,、]\s*(?:建议)?(?:短期)?(?:随访|复查).*)?"
+                r"\s*[）)]?\s*",
+                s,
+                re.IGNORECASE,
+            )
+        )
+
+        if (
+            has_birads
+            and not has_entity
+            and not has_laterality
+            and standalone_birads
+            and merged
+        ):
             merged[-1] += "。" + s
         else:
             merged.append(s)
@@ -433,6 +472,10 @@ def vector_to_dict(
     process_lymph_node_not_seen()
 
     def reset_unmentioned_positive_entities():
+        """
+        如果正文中完全没有出现指定异常名称，但模型将其预测为 POS，
+        则将该侧状态改为 BLA。已经被规则修正为 NEG 的状态不会受影响。
+        """
         entities_requiring_explicit_mention = [
             '淋巴结肿大',
             '乳头凹陷',
@@ -450,7 +493,7 @@ def vector_to_dict(
                 if breast['Entities'].get(entity) == 'POS':
                     breast['Entities'][entity] = 'BLA'
 
-
+    # 放在所有实体规则之后执行，清除模型对未提及异常的 POS 误报。
     reset_unmentioned_positive_entities()
     
     return {
@@ -762,90 +805,109 @@ class MammoRGTool(object):
             def process_suggestive_of_relations():
                 if 'Impression:' in origin_text:
                     impression_part = origin_text.split('Impression:')[-1].strip()
-                    
-                    new_relations = []
-                    suggestive_relations_to_keep = set()
-                    sentences = re.split('[。；]', impression_part)
+
+                    # “；/。”以及编号项是硬边界。只有真正独立的
+                    # “BI-RADS 3”补充句才允许由 merge_birads_sentences
+                    # 合并回上一条病灶描述。
+                    sentences = re.split(r'[。；;\n]+', impression_part)
                     sentences = [s.strip() for s in sentences if s.strip()]
                     sentences = merge_birads_sentences(sentences)
-                    sentences = [sentence.upper().replace(" ", "") for sentence in sentences]
-                    for rel in relations:
-                        if rel[1] == "Suggestive_of":
-                            entity = rel[0]
-                            birads = rel[2]
-                            
-                            is_correct = False
-                            
-                            birads = birads.upper().replace(" ", "")
-                            
-                            for sentence in sentences:
-                                if entity in sentence and birads in sentence:
-                                    birads_index = sentence.find(birads)
-                                    if birads_index != -1:
-                                        text_before_birads = sentence[:birads_index]
-                                        if entity in text_before_birads and '未见' not in text_before_birads:
-                                            is_correct = True
-                                            suggestive_relations_to_keep.add((entity, birads))
-                                            break
-                            
-                            if is_correct:
-                                new_relations.append(rel)
-                        else:
-                            new_relations.append(rel)
-                    
-                    relations.clear()
-                    relations.extend(new_relations)
-                    
-                    birads_patterns = [
-                        r'BI-RADS\s*[0-6][A-Ca-c]?',
-                        r'BI-RADS\s*[0-6][A-Ca-c]?',
-                        r'BI-RADS\s*[0-6][A-Ca-c]?',
-                        r'BiRads\s*[0-6][A-Ca-c]?',
-                        r'BIRADS\s*[0-6][A-Ca-c]?',
-                        r'birads\s*[0-6][A-Ca-c]?'
-                    ]
-                    
-                    for sentence in sentences:
-                        birads_matches = []
-                        for pattern in birads_patterns:
-                            matches = re.findall(pattern, sentence, re.IGNORECASE)
-                            birads_matches.extend(matches)
-                        
-                        if not birads_matches:
-                            loose_matches = re.findall(r'(?i)(?:bi[-\s]?rads)\s*([0-6][a-c]?)', sentence)
-                            birads_matches = [f"BI-RADS {match}" for match in loose_matches]
-                        
-                        for birads_match in birads_matches:
-                            birads_clean = re.sub(r'\s+', ' ', birads_match).strip()
-                            birads_clean = re.sub(r'(?i)bi[-\s]?rads', 'BI-RADS', birads_clean, count=1)
-                            
-                            birads_clean = birads_clean.upper().replace(" ", "")
-                            
-                            birads_index = sentence.find(birads_match)
-                            if birads_index == -1:
-                                birads_index = sentence.find(birads_clean)
-                            
-                            if birads_index != -1:
-                                text_before_birads = sentence[:birads_index]
 
-                                for entity in ENTITY_NAMES:
-                                    if entity in text_before_birads:
-                                        left_pos = breast_assessment['Left_breast']['Entities'].get(entity) == 'POS'
-                                        right_pos = breast_assessment['Right_breast']['Entities'].get(entity) == 'POS'
-                        
-                                        
-                                        if (left_pos or right_pos) and '未见' not in text_before_birads:
-                                            relation_exists = any(
-                                                rel[0] == entity and 
-                                                rel[1] == "Suggestive_of" and 
-                                                rel[2] == birads_clean 
-                                                for rel in relations
-                                            )
-                                            
-                                            if not relation_exists and (entity, birads_clean) not in suggestive_relations_to_keep:
-                          
-                                                relations.append([entity, "Suggestive_of", birads_clean])
-                                                suggestive_relations_to_keep.add((entity, birads_clean))
+                    birads_pattern = re.compile(
+                        r'BI\s*[-/\s]?\s*RADS\s*[:：]?\s*([0-6](?:[A-Ca-c])?)',
+                        re.IGNORECASE,
+                    )
+
+                    def nearest_side(text):
+                        """返回文本中最后出现的乳房侧别。"""
+                        side_hits = []
+                        for side, pattern in (
+                            ('double', r'双侧乳|双乳|双侧'),
+                            ('left', r'左侧乳|左乳'),
+                            ('right', r'右侧乳|右乳'),
+                        ):
+                            for match in re.finditer(pattern, text):
+                                side_hits.append((match.start(), side))
+                        return max(side_hits)[1] if side_hits else None
+
+                    def entity_is_positive(entity, side):
+                        left_pos = (
+                            breast_assessment['Left_breast']['Entities'].get(entity)
+                            == 'POS'
+                        )
+                        right_pos = (
+                            breast_assessment['Right_breast']['Entities'].get(entity)
+                            == 'POS'
+                        )
+                        if side == 'left':
+                            return left_pos
+                        if side == 'right':
+                            return right_pos
+                        if side == 'double':
+                            return left_pos or right_pos
+                        return left_pos or right_pos
+
+                    # 丢弃模型直接给出的 Suggestive_of，只保留下面能够由
+                    # Impression 局部文本明确验证/重建的关系。
+                    relations[:] = [
+                        rel for rel in relations if rel[1] != "Suggestive_of"
+                    ]
+                    extracted_suggestive = set()
+
+                    for sentence in sentences:
+                        matches = list(birads_pattern.finditer(sentence))
+                        previous_birads_end = 0
+
+                        for match in matches:
+                            # 第二个及后续 BI-RADS 只能查看前一个 BI-RADS
+                            # 之后的局部文本，避免“左结节→右乳 BI-RADS”的
+                            # 跨侧、跨病灶配对。
+                            local_context = sentence[
+                                previous_birads_end:match.start()
+                            ]
+                            previous_birads_end = match.end()
+
+                            birads_clean = f"BI-RADS{match.group(1).upper()}"
+                            birads_side = nearest_side(local_context)
+
+                            for entity in ENTITY_NAMES:
+                                entity_index = local_context.rfind(entity)
+                                if entity_index == -1:
+                                    continue
+
+                                # 只检查距离该实体最近的局部描述，防止更早的
+                                # “未见”错误否定后面的阳性实体。
+                                prefix_start = max(
+                                    local_context.rfind('，', 0, entity_index),
+                                    local_context.rfind(',', 0, entity_index),
+                                    local_context.rfind('：', 0, entity_index),
+                                    local_context.rfind(':', 0, entity_index),
+                                )
+                                entity_prefix = local_context[
+                                    prefix_start + 1:entity_index
+                                ]
+                                if '未见' in entity_prefix:
+                                    continue
+
+                                entity_side = nearest_side(
+                                    local_context[:entity_index + len(entity)]
+                                )
+                                if (
+                                    entity_side in {'left', 'right'}
+                                    and birads_side in {'left', 'right'}
+                                    and entity_side != birads_side
+                                ):
+                                    continue
+
+                                side_for_state = entity_side or birads_side
+                                if not entity_is_positive(entity, side_for_state):
+                                    continue
+
+                                extracted_suggestive.add(
+                                    (entity, "Suggestive_of", birads_clean)
+                                )
+
+                    relations.extend([list(rel) for rel in extracted_suggestive])
 
             process_suggestive_of_relations()
             relations = list(set(tuple(r) for r in relations))
@@ -1307,5 +1369,19 @@ class MammoRGTool(object):
             return_bootstrap=return_bootstrap
         )
 
+if __name__ == "__main__":
+    # pred=["Findings: 双乳基本对称，呈不均匀致密型，见斑片状、结节状密影及脂肪组织填充，双乳未见明确肿块影及钙化灶。双乳悬韧带增粗，未见明确血管增多及导管增粗。双乳皮肤、乳晕及乳头未见明显异常。左乳乳内见一淋巴结影，大小约9mm*6mm。; Impression: 1.双乳呈不均匀致密型。 2.右乳符合BI-RADS 0，建议乳腺MRI检查。 3.左乳符合BI-RADS 2，左乳乳内一淋巴结。"]
+    # ref=["Findings: 双乳呈致密型，前缘不规则见悬韧带影，腺体密度不均匀，见片状密度增高影，其间夹杂少量乳内脂肪。双乳不对称，左乳较右乳小。右乳内上象限见一卵圆形结节，大小约0.9cm×0.6cm，边缘大部分清晰，密度均与腺体接近，未见异常血管影及恶性钙化。双乳内另见少量散在点状及颗粒状钙化。左乳内未见确切块影。双乳皮下脂肪层清晰，皮肤不厚，乳头正常。右侧腋下见腺体样组织。; Impression: 1、右乳内上象限结节，性质良性，建议短期随访。BI-RADS 3。2、双乳乳腺增生，建议定期复查。BI-RADS 1。3、双乳钙化，考虑良性钙化。BI-RADS 2。4、右侧腋下副乳腺。"]
+    # tool=MammoRGTool()
+    # output=tool.get_output(pred, ref, calculate_ci=True)
+    # print('reference:',ref[0])
+    # print('generated-report:',pred[0])
+    # print('Metrics:',output)
+    pred="Findings: 双侧乳腺显影为不均匀致密类，实质呈索条状、结节样及絮片状，边缘模糊，部分融合； L0片示左侧乳腺上方后1/3见局灶不对称致密影，边缘遮蔽，范围约2.2×1.2cm，内未见钙化及肿 块影; 双侧乳腺皮肤正常，未见厚皮征；乳头无内陷，乳晕区未见异常；皮下脂肪层清晰、透亮；悬韧带 显影正常，未见明显增厚及牵拉征象； 双侧腋前份见淋巴结影，大小及形态未见明显异常。; Impression: 左侧乳腺上方局灶不对称致密影，考虑增生融合所致；双侧乳腺增生、部分增生融合（BI-RADS2 类，建议12个月复查）。"
+    
+    tool=MammoRGTool()
+    output=tool.test(pred)
+    # print('Metrics:',output)
+    
     
     
