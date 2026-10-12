@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import re
+import unicodedata
 import torch.optim as optim
 from torch import nn
 import torch.nn.functional as F
@@ -57,108 +58,336 @@ birads_priority = {
     'ⅰ': 1, 'ⅱ': 2, 'ⅲ': 3, 'ⅳ': 4, 'ⅴ': 5, 'ⅵ': 6
 }
 
-def rule_based_get_birads(conclusion, laterality):
-    if pd.isna(conclusion) or conclusion is None:
+
+# assessment_rules rules (inlined; private names isolated).
+
+_assessment_SIDE_RE = re.compile(r'双侧乳房|双侧乳|双乳|双侧|左侧乳房|右侧乳房|左侧乳|右侧乳|左乳|右乳|左侧|右侧')
+_assessment_DENSITY_RE = re.compile(r'不均匀致密型|纤维腺体型|脂肪型|致密型')
+_assessment_BIRADS_RE = re.compile(r'BI\s*[-/\s]?\s*RADS\s*[:：]?\s*([0-6](?:[A-Ca-c])?)(?![\dA-Za-z])(?:\s*[类级])?', re.I)
+# A decimal measurement (e.g. 1.5 cm) is not a numbered impression item.
+_assessment_ITEM_RE = re.compile(r'(?:^|(?<=\s)|(?<=[。；;]))(?:[（(]\d+[）)]|\d+[、)]|\d+\.(?!\d))\s*')
+_assessment_NEGATIVE_RE = re.compile(r'未见|未发现|无明显|无明确|无|否认|不伴|不见|不能排除|不除外|可疑')
+_assessment_PURE_ASSESSMENT_RE = re.compile(
+    r'[\s，,、：:（()）]*(?:而|及|和|以及)?\s*'
+    r'(?:左侧乳房|右侧乳房|左侧乳|右侧乳|左乳|右乳|左侧|右侧)'
+    r'\s*(?:符合|评为|评估为|分类为|为|属)?\s*[：:]?\s*')
+
+
+def _assessment_nearest_side(text):
+    hits = list(_assessment_SIDE_RE.finditer(text))
+    if not hits:
         return None
-    conclusion = str(conclusion)
+    word = hits[-1].group()
+    return 'L' if word.startswith('左') else 'R' if word.startswith('右') else 'LR'
 
-    # 1) 只用 Impression 段，避免 Findings 的“左乳/右乳/双乳”干扰侧别关联
-    m = re.search(r'Impression\s*[:：]', conclusion, flags=re.IGNORECASE)
-    text = conclusion[m.end():] if m else conclusion
 
-    # 2) 更宽松的 BI-RADS 识别：BI-RADS分类：3 / BI RADS 3 / BI/RADS 3 / BI-RADS 4A / BIRADS 2 / 分类：2
-    # birads_pattern = re.compile(
-    #     r'(?:'
-    #     r'BI\s*[-/\s]?\s*RADS'      # BI-RADS / BI RADS / BI/RADS
-    #     r'|BIRADS'                  # BIRADS
-    #     r'|Bi\s*[-/\s]?\s*Rads'     # BI-RADS / Bi Rads
-    #     r'|分类'
-    #     r')'
-    #     r'(?:\s*分类)?\s*[:：]?\s*'
-    #     r'([IVXivxⅠⅡⅢⅣⅤⅥⅰⅱⅲⅳⅴⅵ]+|\d+(?:[a-cA-C])?)',
-    #     re.IGNORECASE
-    # )
-    birads_pattern = re.compile(
-        r'(?:BI\s*[-/\s]?\s*RADS|BIRADS|Bi\s*[-/\s]?\s*Rads|分类)'
-        r'(?:\s*分类)?\s*[:：]?\s*'
-        r'(0|[1-6](?:[A-Ca-c])?|[IVXivxⅠⅡⅢⅣⅤⅥⅰⅱⅲⅳⅴⅵ]+)',
-        re.IGNORECASE
-    )
+def _assessment_statements(text):
+    return [s.strip() for s in re.split(r'[。；;\n]+', _assessment_ITEM_RE.sub('\n', text)) if s.strip()]
 
-    side_keywords = {
-        'left':   ['左乳', '左'],
-        'right':  ['右乳', '右'],
-        'double': ['双侧乳', '双乳', '双侧'],
-    }
 
-    # 3) 找 text 内所有侧别位置（长词优先）
-    side_positions = []
-    for side_type, kws in side_keywords.items():
-        for kw in sorted(kws, key=len, reverse=True):
-            for sm in re.finditer(re.escape(kw), text):
-                side_positions.append({'pos': sm.start(), 'type': side_type})
-    side_positions.sort(key=lambda x: x['pos'])
+def rule_based_get_density(conclusion, laterality):
+    """Associate each density mention with its own preceding side in that statement.
 
-    # 4) 找所有 BI-RADS，并做标准化 + 打分
-    birads_matches = []
-    for bm in birads_pattern.finditer(text):
-        raw = bm.group(1).upper()
+    Preserve first-mention and unilateral-over-bilateral priority. Do not use a
+    later side to reassign an earlier density, or carry ownership across a full
+    stop/semicolon/numbered item. Commas and colons may separate side and density.
+    """
+    if not isinstance(conclusion, str) or laterality not in ('L', 'R'):
+        return None
+    mentions = []
+    for sentence in _assessment_statements(conclusion):
+        for m in _assessment_DENSITY_RE.finditer(sentence):
+            side = _assessment_nearest_side(sentence[:m.start()])
+            clause = re.split(r'[，,:：]', sentence[:m.start()])[-1]
+            if side and not re.search(r'非|不属|不是|未见|不能排除', clause):
+                mentions.append((side, m.group()))
+    own = [value for side, value in mentions if side == laterality]
+    bilateral = [value for side, value in mentions if side == 'LR']
+    return (own or bilateral or [None])[0]
 
-        if raw in roman_to_arabic:
-            norm_num = str(roman_to_arabic[raw])
-        elif re.match(r'^\d+[A-C]$', raw):
-            norm_num = raw.lower()   # 4A -> 4a 用于 priority
+
+def _assessment_positive(assessment, entity, side):
+    sides = side or 'LR'
+    return any(assessment.get('Left_breast' if s == 'L' else 'Right_breast', {})
+               .get('Entities', {}).get(entity) == 'POS' for s in sides)
+
+
+def _assessment_mentions(context, entity_names):
+    pattern = re.compile('|'.join(re.escape(e) for e in sorted(entity_names, key=len, reverse=True)))
+    hits = list(pattern.finditer(context)) if entity_names else []
+    found = []
+    for i, m in enumerate(hits):
+        prefix = re.split(r'[，,:：]|但是|但|然而', context[:m.start()])[-1]
+        tail = context[m.end():hits[i+1].start() if i+1 < len(hits) else len(context)]
+        tail = re.split(r'[，,:：、及和]|但是|但|然而', tail)[0]
+        negated = bool(_assessment_NEGATIVE_RE.search(prefix) or re.match(r'\s*(?:未见|未发现|不明显|阴性|不存在)', tail))
+        found.append((m.group(), _assessment_nearest_side(context[:m.end()]), negated))
+    return found
+
+
+def _assessment_merge_standalone_grades(parts):
+    merged = []
+    for part in parts:
+        # Only a bare grade (with optional follow-up advice) can refer back across
+        # a sentence boundary. An explicit side denotes a new assessment.
+        standalone = re.fullmatch(
+            r'[（(]?\s*BI\s*[-/\s]?\s*RADS\s*[:：]?\s*[0-6](?:[A-Ca-c])?\s*[类级]?'
+            r'(?:\s*[，,、]\s*(?:建议)?(?:短期)?(?:随访|复查).*)?\s*[）)]?', part, re.I)
+        # Numbered items are split before this function but retained as markers;
+        # a grade under a new number must never attach to a prior lesion.
+        if standalone and merged:
+            merged[-1] += '，' + part
         else:
-            norm_num = raw
+            merged.append(part)
+    return merged
 
-        birads_matches.append({
-            'norm_num': norm_num,  # 用于优先级
-            'priority': birads_priority.get(norm_num, -1),
-            'start': bm.start(),
-        })
 
-    if not birads_matches:
+def extract_suggestive_of(text, assessment, entity_names):
+    """Return triples, or None if no Impression section exists.
+
+    A shared bilateral antecedent can be reused only in the SAME statement,
+    when the next local span is an explicit unilateral assessment with no new
+    finding, negation, location or advice. New lesion text replaces that context.
+    """
+    if not isinstance(text, str):
         return None
+    header = re.search(r'Impression\s*[:：]', text, re.I)
+    if not header:
+        return None
+    impression = text[header.end():]
+    # Process numbered groups separately so standalone grades cannot bridge them.
+    groups = _assessment_ITEM_RE.split(impression)
+    triples = set()
+    for group in groups:
+        parts = _assessment_merge_standalone_grades([p.strip() for p in re.split(r'[。；;\n]+', group) if p.strip()])
+        for sentence in parts:
+            end = 0
+            shared = []
+            for grade in _assessment_BIRADS_RE.finditer(sentence):
+                context = sentence[end:grade.start()]
+                end = grade.end()
+                side = _assessment_nearest_side(context)
+                found = _assessment_mentions(context, entity_names)
+                if found:
+                    candidates = found
+                    # Only explicitly bilateral, non-negated antecedents qualify.
+                    # A new unilateral finding makes ellipsis ambiguous.
+                    shared = [m for m in found if m[1] == 'LR' and not m[2]] if all(m[1] == 'LR' for m in found) else []
+                elif shared and side in ('L', 'R') and _assessment_PURE_ASSESSMENT_RE.fullmatch(context):
+                    candidates = shared
+                else:
+                    shared = []
+                    candidates = []
+                for entity, entity_side, negative in candidates:
+                    if negative:
+                        continue
+                    if side and entity_side and not set(side).intersection(entity_side):
+                        continue
+                    # A bilateral finding plus a right grade needs RIGHT POS,
+                    # not merely POS on either breast.
+                    effective_side = ''.join(s for s in 'LR' if (not side or s in side) and (not entity_side or s in entity_side))
+                    if _assessment_positive(assessment, entity, effective_side):
+                        triples.add((entity, 'Suggestive_of', 'BI-RADS' + grade.group(1).upper()))
+    return sorted(triples)
 
-    # 5) 侧别关联：只在 Impression 段里做“前面最近侧别”
-    birads_with_sides = []
-    for b in birads_matches:
-        preceding = [s for s in side_positions if s['pos'] < b['start']]
-        nearest = max(preceding, key=lambda x: x['pos']) if preceding else None
-        birads_with_sides.append({
-            'norm_num': b['norm_num'],
-            'priority': b['priority'],
-            'side_type': nearest['type'] if nearest else None
-        })
 
-    # 6) laterality 过滤（优先单侧，其次 double）
-    if laterality == 'L':
-        valid = (
-            [x for x in birads_with_sides if x['side_type'] == 'left'] +
-            [x for x in birads_with_sides if x['side_type'] == 'double']
-        )
-    elif laterality == 'R':
-        valid = (
-            [x for x in birads_with_sides if x['side_type'] == 'right'] +
-            [x for x in birads_with_sides if x['side_type'] == 'double']
-        )
+# birads_rules rules (inlined; private names isolated).
+
+_birads_VERSION = 'birads-scoped-v1'
+_birads_PREFIX = r'(?:BI\s*[-/\s]?\s*RADS(?:\s*(?:分类|分级|评估))?|(?<!密度)(?<!ACR)分类)\s*[:：-]?\s*'
+_birads_GRADE = r'(?:4\s*[ABC]|[0-6]|VI|IV\s*[ABC]?|III|II|V|I|[零〇一二三四五六](?:\s*[ABC])?)'
+_birads_GRADE_END = r'(?![\dA-Za-z.])'
+_birads_GRADE_RE = re.compile(r'(?P<grade>'+_birads_GRADE+r')'+_birads_GRADE_END+r'\s*(?:类|级|category)?', re.I)
+_birads_PREFIX_RE = re.compile(_birads_PREFIX, re.I)
+_birads_FULL_RE = re.compile(_birads_PREFIX+r'(?P<grade>'+_birads_GRADE+r')'+_birads_GRADE_END+r'\s*(?:类|级|category)?', re.I)
+_birads_SIDE_TOKEN = r'(?:左侧乳房|右侧乳房|左侧乳|右侧乳|左乳房|右乳房|双侧乳房|双侧乳|左乳|右乳|双乳|左侧|右侧|双侧|左右乳|右左乳|\bleft(?:\s+breast)?\b|\bright(?:\s+breast)?\b|\bboth\s+breasts\b|(?<![\w])[LR](?![\w])|[左右](?=\s*(?:[、,，/和及与:：)）]|乳|为|属|BI|[0-6])))'
+_birads_SIDE_RE = re.compile(_birads_SIDE_TOKEN, re.I)
+_birads_NUMBER_RE = re.compile(r'(?:^|(?<=\s)|(?<=[。；;]))(?:\([0-9一二三四五六七八九十]+\)|[0-9一二三四五六七八九十]+[、)]|\d+\.(?!\d))\s*')
+_birads_HEADER_RE = re.compile(r'Impression\s*:|诊断意见\s*:|诊断结论\s*:|影像诊断\s*:|检查结论\s*:|印象\s*:|结论\s*:',re.I)
+_birads_STOP_HEADER_RE = re.compile(r'(?:^|[;；。\n])\s*(?:Findings|所见|影像所见|检查所见|Recommendations|建议)\s*:',re.I)
+_birads_TIME_RE = re.compile(r'既往|上次|曾评为|原评为|原为|历史|术前|本次|目前|现评为|复查评为|调整为|更正为|最终')
+_birads_FINAL_WORDS = {'调整为','更正为','最终'}
+_birads_CURRENT_WORDS = _birads_FINAL_WORDS | {'本次','目前','现评为','复查评为'}
+
+
+def _birads_side(word):
+    word=word.lower()
+    if word.startswith(('双','both')) or word in ('左右乳','右左乳'):
+        return 'LR'
+    return 'L' if word.startswith(('左','left')) or word=='l' else 'R'
+
+
+def _birads_grade(raw):
+    raw=re.sub(r'\s+','',raw.upper())
+    romans={'I':'1','II':'2','III':'3','IV':'4','V':'5','VI':'6'}
+    chinese=dict(zip('零〇一二三四五六','00123456'))
+    if raw.startswith('IV') and raw[-1:] in ('A','B','C'):
+        raw='4'+raw[-1]
+    elif raw[:1] in chinese:
+        raw=chinese[raw[0]]+raw[1:]
     else:
+        raw=romans.get(raw,raw)
+    return raw if re.fullmatch(r'[0-6]|4[ABC]',raw) else None
+
+
+def _birads_side_hits(text):
+    return [(m.start(),m.end(),_birads_side(m.group())) for m in _birads_SIDE_RE.finditer(text)]
+
+
+def _birads_owner(text):
+    hits=_birads_side_hits(text)
+    if not hits:
         return None
+    if len(hits)>=2 and {hits[-2][2],hits[-1][2]}=={'L','R'}:
+        between=text[hits[-2][1]:hits[-1][0]]
+        if re.fullmatch(r'\s*(?:、|,|，|/|和|及|与|and|&)\s*',between,re.I):
+            return 'LR'
+    return hits[-1][2]
 
-    if not valid:
-        return None
 
-    best = max(valid, key=lambda x: x['priority'])
+def _birads_post_side(text):
+    # A side in immediate parentheses belongs to THIS grade. It must not become
+    # a prefix for the next grade. Arbitrary later text is never searched.
+    m=re.match(r'\s*\(\s*('+_birads_SIDE_TOKEN+r')\s*\)',text,re.I)
+    return (_birads_side(m.group(1)),m.end()) if m else (None,0)
 
-    # 7) 返回标准类名（必须匹配你的 BI_RADS_CLASSES）
-    # norm_num 可能是 '4a' -> 输出 '4A'
-    num = best['norm_num']
-    if re.match(r'^\d+[a-c]$', num):
-        num_out = num[:-1] + num[-1].upper()
-    else:
-        num_out = num
 
-    return f"BI-RADS {num_out}"
+def _birads_priority(grade):
+    return int(grade[0]) + ({'A':.1,'B':.2,'C':.3}.get(grade[-1],0))
+
+
+def _birads_tokens(sentence):
+    """Recognize explicit labels and tightly bound shorthand, retaining invalids."""
+    tokens=[]
+    for p in _birads_PREFIX_RE.finditer(sentence):
+        m=_birads_GRADE_RE.match(sentence,p.end())
+        if m:
+            tokens.append({'start':p.start(),'end':m.end(),'grade':_birads_grade(m['grade']), 'reason':None})
+        else:
+            tokens.append({'start':p.start(),'end':p.end(),'grade':None,'reason':'invalid_or_missing_grade'})
+    # Shorthand is permitted only in a BI-RADS-bearing statement: left 3/right 2,
+    # or a grade list introduced by 分别. Numbers elsewhere remain measurements.
+    if re.search(r'BI\s*[-/\s]?\s*RADS',sentence,re.I):
+        for sm in _birads_SIDE_RE.finditer(sentence):
+            start=sm.end()
+            intro=re.match(r'\s*(?:为|属|评为|符合)?\s*[:：]?\s*',sentence[start:])
+            gm=_birads_GRADE_RE.match(sentence,start+intro.end())
+            if gm and not any(t['start']<=gm.start()<t['end'] for t in tokens):
+                after=sentence[gm.end():]
+                if re.match(r'\s*(?:mm|cm|毫米|厘米|点|时)',after,re.I):
+                    continue
+                tokens.append({'start':gm.start(),'end':gm.end(),'grade':_birads_grade(gm['grade']),'reason':None})
+        if '分别' in sentence:
+            for t in list(tokens):
+                cursor=t['end']
+                while True:
+                    sep=re.match(r'\s*[、,，/]\s*',sentence[cursor:])
+                    if not sep:break
+                    gm=_birads_GRADE_RE.match(sentence,cursor+sep.end())
+                    if not gm:break
+                    if not any(x['start']<=gm.start()<x['end'] for x in tokens):
+                        tokens.append({'start':gm.start(),'end':gm.end(),'grade':_birads_grade(gm['grade']),'reason':None})
+                    cursor=gm.end()
+    tokens = [t for t in tokens if not (t['reason']=='invalid_or_missing_grade' and any(x['start'] >= t['end'] for x in tokens) and re.match(r'\s*'+_birads_SIDE_TOKEN, sentence[t['end']:], re.I))]
+    tokens.sort(key=lambda t:t['start'])
+    for t in tokens:
+        tail=sentence[t['end']:]
+        if re.match(r'\s*(?:-|~|至|到|或|/|、)\s*(?:'+_birads_PREFIX+r')?(?:'+_birads_GRADE+r')',tail,re.I) and '分别' not in sentence:
+            t['reason']='range_or_alternative'
+        if t['grade'] is None:
+            t['reason']=t['reason'] or 'invalid_grade'
+    return tokens
+
+
+def parse_birads(conclusion):
+    """Return selected labels plus accepted/rejected mention diagnostics."""
+    out={'L':None,'R':None,'mentions':[],'rejected':[], 'version':_birads_VERSION}
+    if not isinstance(conclusion,str) or not conclusion.strip():return out
+    text=unicodedata.normalize('NFKC',conclusion)
+    text=re.sub('[‐‑–—−]','-',text)
+    header=_birads_HEADER_RE.search(text)
+    if header:text=text[header.end():]
+    stop=_birads_STOP_HEADER_RE.search(text)
+    if stop:text=text[:stop.start()]
+    # Number-like grade list elements are not numbered report items.
+    grade_spans=[(t['start'],t['end']) for t in _birads_tokens(text)]
+    boundaries=[m for m in _birads_NUMBER_RE.finditer(text) if not any(a <= m.start()+len(m.group())-len(m.group().lstrip()) < b for a,b in grade_spans)]
+    groups=[]
+    cursor=0
+    for boundary in boundaries:
+        groups.append(text[cursor:boundary.start()])
+        cursor=boundary.end()
+    groups.append(text[cursor:])
+    for group_id,group in enumerate(groups):
+        previous=None
+        for statement_id,sentence in enumerate(re.split(r'[。；;\n]+',group)):
+            if not sentence.strip():continue
+            tokens=_birads_tokens(sentence)
+            if not tokens:
+                owners={h[2] for h in _birads_side_hits(sentence)}
+                previous=next(iter(owners)) if len(owners)==1 else None
+                continue
+            respective=None
+            if '分别' in sentence:
+                before=sentence.split('分别',1)[0]
+                hits=_birads_side_hits(before)
+                if len(hits)>=2 and {hits[-2][2],hits[-1][2]}=={'L','R'}:
+                    respective=[hits[-2][2],hits[-1][2]]
+                elif re.search(r'左右乳\s*$',before):respective=['L','R']
+                elif re.search(r'右左乳\s*$',before):respective=['R','L']
+                if respective is None or len(tokens)!=2 or any(t['reason'] for t in tokens):
+                    for t in tokens:out['rejected'].append({**t,'reason':'ambiguous_respective_mapping','statement':sentence})
+                    previous=None
+                    continue
+            consumed=0
+            active=None
+            for i,t in enumerate(tokens):
+                prefix=sentence[consumed:t['start']]
+                post,post_length=_birads_post_side(sentence[t['end']:])
+                explicit=_birads_owner(prefix + ('0' if re.search(r'[左右]$',prefix) else ''))
+                side=respective[i] if respective else post or explicit
+                reason=t['reason']
+                if post and explicit and post!=explicit and not respective:
+                    reason='conflicting_pre_and_post_side'
+                if side is None:
+                    if i==0:
+                        # Only a truly bare supplemental grade can inherit across
+                        # a sentence; numbered groups reset previous entirely.
+                        if not prefix.strip(' \t,，:：()') and len(tokens)==1:
+                            rest=sentence[t['end']+post_length:]
+                            if re.fullmatch(r'\s*(?:[，,]\s*(?:建议|必要时|请|随访|复查).*)?\s*',rest) and not _birads_side_hits(rest):
+                                side=previous
+                    else:
+                        side=active
+                # Do not treat density ownership or prior nonspecific breast
+                # text as a side for an unrelated later numbered item.
+                local=re.split(r'[，,:：]',prefix)[-1]
+                if re.search(r'不是|并非|不属于|不评为|不考虑|不能排除|(?:^|\s)非',local):reason='negated_or_uncertain_grade'
+                # Alternatives also poison the following grade, not just first.
+                if re.match(r'\s*(?:或|至|到|-|/|、)\s*$',prefix) and i>0 and not respective:reason='range_or_alternative'
+                time_hits=list(_birads_TIME_RE.finditer(sentence[:t['start']]))
+                marker=time_hits[-1].group() if time_hits else None
+                if marker and marker not in _birads_CURRENT_WORDS:reason='historical_grade'
+                if not side:reason=reason or 'unresolved_side'
+                row={**t,'side':side,'final':marker in _birads_FINAL_WORDS,'group':group_id,'statement_index':statement_id,'statement':sentence}
+                if reason:out['rejected'].append({**row,'reason':reason})
+                else:out['mentions'].append(row)
+                active=side if reason in (None,'historical_grade') else None
+                consumed=t['end']+post_length
+            previous=None # No implicit ownership from a preceding assessed item.
+    for side in 'LR':
+        own=[m for m in out['mentions'] if m['side']==side]
+        both=[m for m in out['mentions'] if m['side']=='LR']
+        candidates=own or both
+        final=[m for m in candidates if m['final']]
+        candidates=final or candidates
+        if candidates:out[side]='BI-RADS '+max(candidates,key=lambda m:_birads_priority(m['grade']))['grade']
+    return out
+
+
+def rule_based_get_birads(conclusion,laterality):
+    return parse_birads(conclusion).get(laterality) if laterality in ('L','R') else None
+
 
 def merge_birads_sentences(sentences):
     merged = []
@@ -207,73 +436,6 @@ def merge_birads_sentences(sentences):
 
     return merged
 
-def rule_based_get_density(conclusion, laterality):
-    if pd.isna(conclusion):
-        return None
-
-    side_keywords = {
-        'left': ['左', '左乳'],
-        'right': ['右', '右乳'],
-        'double': ['双乳', '双侧', '双侧乳']
-    }
-
-    side_positions = []
-    for side_type, keywords in side_keywords.items():
-        for keyword in keywords:
-            for match in re.finditer(keyword, conclusion):
-                side_positions.append({
-                    'pos': match.start(),
-                    'type': side_type,
-                    'keyword': keyword
-                })
-    side_positions.sort(key=lambda x: x['pos'])
-
-    def find_density(text):
-        text = text.lower()
-        if any(kw in text for kw in ['不均匀致密型']):
-            return '不均匀致密型'
-        elif any(kw in text for kw in ['纤维腺体型']):
-            return '纤维腺体型'
-        elif any(kw in text for kw in ['致密型']):
-            return '致密型'
-        elif any(kw in text for kw in ['脂肪型']):
-            return '脂肪型'
-        return None
-
-    density_paragraphs = []
-    for i, char in enumerate(conclusion):
-        if char in ['：', ':', '，', ',', '。', '；', ';'] or i == len(conclusion)-1:
-            end_pos = i+1 if i < len(conclusion)-1 else i
-            paragraph = conclusion[:end_pos]
-            density = find_density(paragraph)
-            if density:
-                preceding_sides = [s for s in side_positions if s['pos'] < i]
-                if preceding_sides:
-                    nearest_side = max(preceding_sides, key=lambda x: x['pos'])
-                    density_paragraphs.append({
-                        'density': density,
-                        'side_type': nearest_side['type'],
-                        'side_keyword': nearest_side['keyword'],
-                        'context': paragraph
-                    })
-
-    valid_densities = []
-    if laterality == 'L':
-        left_densities = [d for d in density_paragraphs if d['side_type'] == 'left']
-        if left_densities:
-            valid_densities = left_densities
-        else:
-            valid_densities = [d for d in density_paragraphs if d['side_type'] == 'double']
-    elif laterality == 'R':
-        right_densities = [d for d in density_paragraphs if d['side_type'] == 'right']
-        if right_densities:
-            valid_densities = right_densities
-        else:
-            valid_densities = [d for d in density_paragraphs if d['side_type'] == 'double']
-
-    if valid_densities:
-        return valid_densities[0]['density']
-    return None
 class ZhTokenizer:
     def __init__(self):
         self.tokenizer = BertTokenizer.from_pretrained('/home/jiayi/MammoRG/MammoRGTool/pre_trained_bert/vocab.txt')
@@ -803,111 +965,10 @@ class MammoRGTool(object):
             process_lymph_node()
 
             def process_suggestive_of_relations():
-                if 'Impression:' in origin_text:
-                    impression_part = origin_text.split('Impression:')[-1].strip()
-
-                    # “；/。”以及编号项是硬边界。只有真正独立的
-                    # “BI-RADS 3”补充句才允许由 merge_birads_sentences
-                    # 合并回上一条病灶描述。
-                    sentences = re.split(r'[。；;\n]+', impression_part)
-                    sentences = [s.strip() for s in sentences if s.strip()]
-                    sentences = merge_birads_sentences(sentences)
-
-                    birads_pattern = re.compile(
-                        r'BI\s*[-/\s]?\s*RADS\s*[:：]?\s*([0-6](?:[A-Ca-c])?)',
-                        re.IGNORECASE,
-                    )
-
-                    def nearest_side(text):
-                        """返回文本中最后出现的乳房侧别。"""
-                        side_hits = []
-                        for side, pattern in (
-                            ('double', r'双侧乳|双乳|双侧'),
-                            ('left', r'左侧乳|左乳'),
-                            ('right', r'右侧乳|右乳'),
-                        ):
-                            for match in re.finditer(pattern, text):
-                                side_hits.append((match.start(), side))
-                        return max(side_hits)[1] if side_hits else None
-
-                    def entity_is_positive(entity, side):
-                        left_pos = (
-                            breast_assessment['Left_breast']['Entities'].get(entity)
-                            == 'POS'
-                        )
-                        right_pos = (
-                            breast_assessment['Right_breast']['Entities'].get(entity)
-                            == 'POS'
-                        )
-                        if side == 'left':
-                            return left_pos
-                        if side == 'right':
-                            return right_pos
-                        if side == 'double':
-                            return left_pos or right_pos
-                        return left_pos or right_pos
-
-                    # 丢弃模型直接给出的 Suggestive_of，只保留下面能够由
-                    # Impression 局部文本明确验证/重建的关系。
-                    relations[:] = [
-                        rel for rel in relations if rel[1] != "Suggestive_of"
-                    ]
-                    extracted_suggestive = set()
-
-                    for sentence in sentences:
-                        matches = list(birads_pattern.finditer(sentence))
-                        previous_birads_end = 0
-
-                        for match in matches:
-                            # 第二个及后续 BI-RADS 只能查看前一个 BI-RADS
-                            # 之后的局部文本，避免“左结节→右乳 BI-RADS”的
-                            # 跨侧、跨病灶配对。
-                            local_context = sentence[
-                                previous_birads_end:match.start()
-                            ]
-                            previous_birads_end = match.end()
-
-                            birads_clean = f"BI-RADS{match.group(1).upper()}"
-                            birads_side = nearest_side(local_context)
-
-                            for entity in ENTITY_NAMES:
-                                entity_index = local_context.rfind(entity)
-                                if entity_index == -1:
-                                    continue
-
-                                # 只检查距离该实体最近的局部描述，防止更早的
-                                # “未见”错误否定后面的阳性实体。
-                                prefix_start = max(
-                                    local_context.rfind('，', 0, entity_index),
-                                    local_context.rfind(',', 0, entity_index),
-                                    local_context.rfind('：', 0, entity_index),
-                                    local_context.rfind(':', 0, entity_index),
-                                )
-                                entity_prefix = local_context[
-                                    prefix_start + 1:entity_index
-                                ]
-                                if '未见' in entity_prefix:
-                                    continue
-
-                                entity_side = nearest_side(
-                                    local_context[:entity_index + len(entity)]
-                                )
-                                if (
-                                    entity_side in {'left', 'right'}
-                                    and birads_side in {'left', 'right'}
-                                    and entity_side != birads_side
-                                ):
-                                    continue
-
-                                side_for_state = entity_side or birads_side
-                                if not entity_is_positive(entity, side_for_state):
-                                    continue
-
-                                extracted_suggestive.add(
-                                    (entity, "Suggestive_of", birads_clean)
-                                )
-
-                    relations.extend([list(rel) for rel in extracted_suggestive])
+                extracted = extract_suggestive_of(origin_text, breast_assessment, ENTITY_NAMES)
+                if extracted is not None:
+                    relations[:] = [rel for rel in relations if rel[1] != "Suggestive_of"]
+                    relations.extend([list(rel) for rel in extracted])
 
             process_suggestive_of_relations()
             relations = list(set(tuple(r) for r in relations))

@@ -572,7 +572,8 @@ def process_samples(data):
             continue 
         
         if rel_type == 'Suggestive_of':
-            if entity1 not in text.split('Impression:')[-1] if 'Impression:' in text else text:
+            impression_header = re.search(r'Impression\s*[:：]', text, re.IGNORECASE)
+            if not impression_header or entity1 not in text[impression_header.end():]:
                 continue
         
         valid_relation = False
